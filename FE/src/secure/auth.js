@@ -4,6 +4,21 @@
 const TOKEN_KEY = 'auth_token';
 const USER_KEY = 'auth_user';
 
+// Prefix used by every sessionStorage key we persist for the
+// stock-transfer UI (segment, search, filters). Kept as a named
+// constant so the sweep below and any future readers agree on it.
+const PERSISTED_TAB_PREFIX = 'sts:';
+
+// ---------------------------------------------------------------------------
+// Session-storage keys for post-redirect notices.
+// ---------------------------------------------------------------------------
+export const CREDENTIALS_NOTICE_KEY = 'ims:credentialsUpdateNotice';
+export const LOGOUT_NOTICE_KEY      = 'ims:logoutNotice';
+
+// The phrase shown on the post-logout modal on the Login page.
+// Rendered as a title-case hero above a muted Lepanto mark.
+export const LOGOUT_NOTICE_MESSAGE = 'Iyaman Kabsat';
+
 /**
  * Store the authentication token in localStorage
  * @param {string} token - JWT token
@@ -27,25 +42,39 @@ export const getToken = () => {
 };
 
 /**
- * Remove token and user data from localStorage.
+ * Clear every sessionStorage key that belongs to the persisted
+ * stock-transfer UI state.
+ */
+const clearPersistedTabState = () => {
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+
+    const toRemove = [];
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+      const key = sessionStorage.key(i);
+      if (key && key.startsWith(PERSISTED_TAB_PREFIX)) toRemove.push(key);
+    }
+    for (const key of toRemove) sessionStorage.removeItem(key);
+  } catch {
+    /* storage unavailable or quota exceeded — ignore */
+  }
+};
+
+/**
+ * Remove token and user data from localStorage, and clear any
+ * persisted per-tab UI state.
  *
  * ⚠️ This only clears LOCAL state. It does NOT notify the backend.
- * For a proper logout, use `useAuth().logout()` from AuthContext —
- * that calls POST /api/users/logout first, then clears localStorage.
- *
- * This function exists for internal use (session-expired redirects,
- * 401 handling inside services/api.js) where the DB session is already
- * terminated or never existed.
  */
 export const removeToken = () => {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  clearPersistedTabState();
   console.log('🗑️ Auth data cleared from localStorage');
 };
 
 /**
  * Store user data in localStorage
- * @param {Object} user - User object (including role, warehouse, etc.)
  */
 export const setUser = (user) => {
   if (user && typeof user === 'object' && user.id) {
@@ -59,7 +88,6 @@ export const setUser = (user) => {
 
 /**
  * Retrieve user data from localStorage
- * @returns {Object|null} User object or null
  */
 export const getUser = () => {
   try {
@@ -70,7 +98,6 @@ export const getUser = () => {
     }
 
     const user = JSON.parse(userStr);
-    // Validate that it has an id (basic validation)
     if (user && user.id) {
       return user;
     } else {
@@ -85,25 +112,16 @@ export const getUser = () => {
   }
 };
 
-/**
- * Check if user is authenticated (has a token)
- * @returns {boolean} True if token exists
- */
 export const isAuthenticated = () => {
   const token = getToken();
   return !!token;
 };
 
-/**
- * Check if the stored token is expired (by decoding it)
- * @returns {boolean} True if token is expired or invalid
- */
 export const isTokenExpired = () => {
   const token = getToken();
   if (!token) return true;
 
   try {
-    // Decode the token (without verifying signature)
     const payload = JSON.parse(atob(token.split('.')[1]));
     const exp = payload.exp;
     if (!exp) return true;
@@ -115,21 +133,61 @@ export const isTokenExpired = () => {
   }
 };
 
-/**
- * Get Authorization header for API requests
- * @returns {Object} Headers object with Authorization if token exists
- */
 export const getAuthHeaders = () => {
   const token = getToken();
   return token ? { 'Authorization': `Bearer ${token}` } : {};
 };
 
 // ---------------------------------------------------------------------------
+// CREDENTIALS-UPDATE NOTICE
+// ---------------------------------------------------------------------------
+export const setCredentialsNotice = (message) => {
+  try {
+    if (message) sessionStorage.setItem(CREDENTIALS_NOTICE_KEY, message);
+  } catch { /* ignore */ }
+};
+
+export const readCredentialsNotice = () => {
+  try { return sessionStorage.getItem(CREDENTIALS_NOTICE_KEY); }
+  catch { return null; }
+};
+
+export const clearCredentialsNotice = () => {
+  try { sessionStorage.removeItem(CREDENTIALS_NOTICE_KEY); }
+  catch { /* ignore */ }
+};
+
+export const logoutWithNotice = (message) => {
+  if (message) setCredentialsNotice(message);
+  removeToken();
+};
+
+// ---------------------------------------------------------------------------
+// LOGOUT THANK-YOU NOTICE
+// ---------------------------------------------------------------------------
+// Written after a SUCCESSFUL explicit logout from the ProfileDropdown.
+// Read by Login.jsx on mount, which then shows a timed modal
+// (auto-dismisses in ~8s, or via X / Esc / Close button).
+// Idle auto-logout and 401 session-expiry intentionally do NOT write this.
+// ---------------------------------------------------------------------------
+export const setLogoutNotice = (message) => {
+  try {
+    sessionStorage.setItem(LOGOUT_NOTICE_KEY, message || LOGOUT_NOTICE_MESSAGE);
+  } catch { /* ignore */ }
+};
+
+export const readLogoutNotice = () => {
+  try { return sessionStorage.getItem(LOGOUT_NOTICE_KEY); }
+  catch { return null; }
+};
+
+export const clearLogoutNotice = () => {
+  try { sessionStorage.removeItem(LOGOUT_NOTICE_KEY); }
+  catch { /* ignore */ }
+};
+
+// ---------------------------------------------------------------------------
 // NOTE: The `logout()` helper has been intentionally removed from this file.
-//
-// It used to just clear localStorage, which caused a bug: the backend's
-// `active_session_token` was never cleared, so the single-session feature
-// rejected subsequent logins as "SESSION_ACTIVE".
 //
 // For proper logout, always use:
 //

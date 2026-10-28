@@ -1,0 +1,322 @@
+/* src/components/shared/ConfirmModal.css */
+
+/* ============================================================
+   BACKDROP
+   ============================================================ */
+.confirm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(12px, 4vw, 24px);
+  background: rgba(10, 15, 20, 0.6);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: confirmFadeIn 0.18s ease-out;
+}
+
+@keyframes confirmFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ============================================================
+   MODAL CARD
+   ============================================================ */
+.confirm-modal {
+  position: relative;
+  width: 100%;
+  max-width: min(440px, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  background: #ffffff;
+  border-radius: clamp(14px, 2vw, 18px);
+  padding: clamp(24px, 4vw, 32px) clamp(20px, 3.5vw, 28px) clamp(20px, 3vw, 24px);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.28),
+    0 4px 14px rgba(0, 0, 0, 0.12),
+    0 0 0 1px rgba(0, 0, 0, 0.04);
+  text-align: center;
+  animation: confirmSlideUp 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+@keyframes confirmSlideUp {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ============================================================
+   ICON CIRCLE
+   ============================================================ */
+.confirm-modal-icon {
+  width: clamp(56px, 10vw, 68px);
+  height: clamp(56px, 10vw, 68px);
+  margin: 0 auto clamp(14px, 2.5vw, 20px);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(26px, 5vw, 32px);
+  line-height: 1;
+  background: rgba(0, 184, 176, 0.1);
+  color: #007a72;
+  box-shadow: inset 0 0 0 1px rgba(0, 184, 176, 0.18);
+}
+
+.confirm-modal.is-danger .confirm-modal-icon {
+  background: rgba(220, 38, 38, 0.1);
+  color: #b91c1c;
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.2);
+}
+
+.confirm-modal.is-warning .confirm-modal-icon {
+  background: rgba(217, 119, 6, 0.1);
+  color: #b45309;
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.2);
+}
+
+/* ============================================================
+   TEXT
+   ============================================================ */
+.confirm-modal-title {
+  margin: 0 0 8px;
+  font-size: clamp(17px, 2.4vw, 19px);
+  font-weight: 700;
+  color: #1a1f26;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.confirm-modal-message {
+  margin: 0 0 clamp(20px, 3vw, 26px);
+  font-size: clamp(13.5px, 1.6vw, 14.5px);
+  color: #5c6b7f;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.confirm-modal-message strong {
+  color: #1a1f26;
+  font-weight: 600;
+}
+
+/* ============================================================
+   ACTIONS
+   ============================================================ */
+.confirm-modal-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.confirm-modal-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: clamp(10px, 1.6vw, 12px) clamp(14px, 2vw, 20px);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: clamp(13.5px, 1.5vw, 14.5px);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid transparent;
+  border-bottom-width: 2px;
+  transition:
+    transform 160ms cubic-bezier(0.34, 1.4, 0.64, 1),
+    background 160ms ease,
+    box-shadow 180ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.confirm-modal-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.confirm-modal-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(0, 184, 176, 0.25);
+}
+
+.confirm-modal.is-danger .confirm-modal-btn:focus-visible {
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.22);
+}
+
+/* ---- Cancel — neutral outline ---- */
+.confirm-modal-btn.is-cancel {
+  background: #ffffff;
+  color: #1e293b;
+  border-color: #cbd5e1;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.confirm-modal-btn.is-cancel:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+/* ---- Confirm — teal (default variant) ---- */
+.confirm-modal-btn.is-confirm {
+  background: #00b8b0;
+  color: #ffffff;
+  border-color: #007a72;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.3) inset,
+    0 2px 6px rgba(0, 122, 114, 0.28),
+    0 6px 16px rgba(0, 184, 176, 0.28);
+}
+
+.confirm-modal-btn.is-confirm:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #00d4cb;
+  border-color: #008a82;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.4) inset,
+    0 4px 10px rgba(0, 122, 114, 0.36),
+    0 12px 26px rgba(0, 184, 176, 0.42);
+}
+
+.confirm-modal-btn.is-confirm:active:not(:disabled) {
+  transform: translateY(0);
+  background: #00a29b;
+}
+
+/* ---- Confirm — danger (red) ---- */
+.confirm-modal.is-danger .confirm-modal-btn.is-confirm {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #991b1b;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.24) inset,
+    0 2px 6px rgba(153, 27, 27, 0.28),
+    0 6px 16px rgba(220, 38, 38, 0.26);
+}
+
+.confirm-modal.is-danger .confirm-modal-btn.is-confirm:hover:not(:disabled) {
+  background: #ef4444;
+  border-color: #991b1b;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.32) inset,
+    0 4px 10px rgba(153, 27, 27, 0.36),
+    0 12px 26px rgba(220, 38, 38, 0.42);
+}
+
+.confirm-modal.is-danger .confirm-modal-btn.is-confirm:active:not(:disabled) {
+  background: #b91c1c;
+}
+
+/* ---- Confirm — warning (amber) ---- */
+.confirm-modal.is-warning .confirm-modal-btn.is-confirm {
+  background: #d97706;
+  color: #ffffff;
+  border-color: #92400e;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.24) inset,
+    0 2px 6px rgba(146, 64, 14, 0.28),
+    0 6px 16px rgba(217, 119, 6, 0.26);
+}
+
+.confirm-modal.is-warning .confirm-modal-btn.is-confirm:hover:not(:disabled) {
+  background: #f59e0b;
+  border-color: #92400e;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+/* ---- Very small phones: stack buttons, confirm on top ---- */
+@media (max-width: 400px) {
+  .confirm-modal-actions {
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+  .confirm-modal-btn {
+    width: 100%;
+    flex: 0 0 auto;
+  }
+}
+
+/* ---- Short landscape: tighten ---- */
+@media (max-height: 500px) and (orientation: landscape) {
+  .confirm-modal {
+    padding: 18px 20px;
+    max-width: min(520px, 90vw);
+  }
+  .confirm-modal-icon {
+    width: 44px;
+    height: 44px;
+    font-size: 22px;
+    margin-bottom: 10px;
+  }
+  .confirm-modal-title { font-size: 16px; }
+  .confirm-modal-message { font-size: 13px; margin-bottom: 16px; }
+  .confirm-modal-btn { padding: 9px 14px; font-size: 13px; min-height: 40px; }
+}
+
+/* ---- Ultra-wide / 4K ---- */
+@media (min-width: 1921px) {
+  .confirm-modal {
+    max-width: 520px;
+    padding: 40px 36px 32px;
+    border-radius: 22px;
+  }
+  .confirm-modal-title { font-size: 22px; }
+  .confirm-modal-message { font-size: 16px; }
+  .confirm-modal-btn {
+    font-size: 16px;
+    padding: 14px 24px;
+    min-height: 52px;
+    border-radius: 12px;
+  }
+}
+
+/* ============================================================
+   ACCESSIBILITY
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  .confirm-modal-backdrop,
+  .confirm-modal { animation: none !important; }
+  .confirm-modal-btn { transition: none !important; }
+  .confirm-modal-btn:hover:not(:disabled) { transform: none !important; }
+}
+
+@media (prefers-contrast: high) {
+  .confirm-modal { border: 2px solid #000; }
+  .confirm-modal-btn { border-width: 2px; }
+  .confirm-modal-btn.is-cancel { border-color: #000; }
+}
+/* ============================================================
+   ICON CIRCLE
+   ============================================================ */
+.confirm-modal-icon {
+  width: clamp(56px, 10vw, 68px);
+  height: clamp(56px, 10vw, 68px);
+  margin: 0 auto clamp(14px, 2.5vw, 20px);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(26px, 5vw, 32px);
+  line-height: 1;
+  background: rgba(0, 184, 176, 0.1);
+  color: #007a72;
+  box-shadow: inset 0 0 0 1px rgba(0, 184, 176, 0.18);
+}
+
+/* Feather icon scaling inside the circle */
+.confirm-modal-icon svg {
+  width: 1em;
+  height: 1em;
+  stroke-width: 2.2;
+}

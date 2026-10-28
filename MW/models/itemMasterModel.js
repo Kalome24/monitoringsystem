@@ -46,42 +46,97 @@ class ItemMasterModel {
   }
 
   /**
-   * Get all item_master records with pagination and search
-   * @param {number} page - page number (1-indexed)
-   * @param {number} limit - items per page
-   * @param {string} search - optional search term
-   * @returns {Promise<{ data: Array, total: number, totalPages: number }>}
+   * ---------------------------------------------------------------------------
+   * Internal — paginated list with optional search pattern and column filters.
+   * Both the COUNT and the DATA query receive the same WHERE clause, so the
+   * total always matches the visible page count.
+   *
+   * Supported filters:
+   *   gl_class        → Gl_Class = @gl_class (Int)
+   *   purchase_class  → Purchase_Class = @purchase_class (NVarChar)
+   *   category        → Category = @category (NVarChar)
+   * ---------------------------------------------------------------------------
    */
-  static async getAll(page = 1, limit = 50, search = '') {
+  static async _paginate({ offset, limit, page, pattern = null, filters = {} }) {
     await poolConnect;
-    const offset = (page - 1) * limit;
 
-    let whereClause = '';
-    let searchParam = null;
-    if (search && search.trim() !== '') {
-      searchParam = `%${search.trim()}%`;
-      whereClause = `
-        WHERE 
-          Item_Code LIKE @search 
-          OR Item_Description LIKE @search 
-          OR Uom_Code LIKE @search 
-          OR Purchase_Class LIKE @search 
-          OR Category LIKE @search
-      `;
-    }
-
-    const countQuery = `SELECT COUNT(*) AS total FROM item_master ${whereClause}`;
     const countRequest = pool.request();
-    if (searchParam) {
-      countRequest.input('search', sql.NVarChar, searchParam);
-    }
-    const countResult = await countRequest.query(countQuery);
-    const total = countResult.recordset[0].total;
-    const totalPages = Math.ceil(total / limit);
+    const dataRequest = pool.request();
+    const where = [];
 
-    // Include Item_Image in SELECT
-    const dataQuery = `
-      SELECT 
+    // ---------- Search pattern (prefix or substring, chosen by the caller) ----
+    if (pattern) {
+      countRequest.input('search', sql.NVarChar, pattern);
+      dataRequest.input('search', sql.NVarChar, pattern);
+      where.push(`(
+        Item_Code        LIKE @search OR
+        Item_Description LIKE @search OR
+        Uom_Code         LIKE @search OR
+        Purchase_Class   LIKE @search OR
+        Category         LIKE @search
+      )`);
+    }
+
+    // ---------- GL Class ------------------------------------------------------
+    if (
+      filters.gl_class != null &&
+      filters.gl_class !== '' &&
+      filters.gl_class !== 'All'
+    ) {
+      const glVal = parseInt(filters.gl_class, 10);
+      if (!Number.isNaN(glVal)) {
+        countRequest.input('gl_class', sql.Int, glVal);
+        dataRequest.input('gl_class', sql.Int, glVal);
+        where.push('Gl_Class = @gl_class');
+      }
+    }
+
+    // ---------- Purchase Class ------------------------------------------------
+    if (
+      filters.purchase_class != null &&
+      filters.purchase_class !== '' &&
+      filters.purchase_class !== 'All'
+    ) {
+      const pcVal = String(filters.purchase_class).trim();
+      if (pcVal) {
+        countRequest.input('purchase_class', sql.NVarChar, pcVal);
+        dataRequest.input('purchase_class', sql.NVarChar, pcVal);
+        where.push('Purchase_Class = @purchase_class');
+      }
+    }
+
+    // ---------- Category ------------------------------------------------------
+    if (
+      filters.category != null &&
+      filters.category !== '' &&
+      filters.category !== 'All'
+    ) {
+      const catVal = String(filters.category).trim();
+      if (catVal) {
+        countRequest.input('category', sql.NVarChar, catVal);
+        dataRequest.input('category', sql.NVarChar, catVal);
+        where.push('Category = @category');
+      }
+    }
+
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    // ---------- Count ---------------------------------------------------------
+    const countResult = await countRequest.query(
+      `SELECT COUNT(*) AS total FROM item_master ${whereClause}`
+    );
+    const total = countResult.recordset[0].total;
+
+    if (total === 0) {
+      return { data: [], total: 0, totalPages: 0, currentPage: page };
+    }
+
+    // ---------- Data ----------------------------------------------------------
+    dataRequest.input('offset', sql.Int, offset);
+    dataRequest.input('limit',  sql.Int, limit);
+
+    const dataResult = await dataRequest.query(`
+      SELECT
         Item_Code,
         Item_Description,
         Uom_Code,
@@ -99,21 +154,99 @@ class ItemMasterModel {
       ${whereClause}
       ORDER BY Item_Code
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-    `;
-
-    const dataRequest = pool.request();
-    dataRequest.input('offset', sql.Int, offset);
-    dataRequest.input('limit', sql.Int, limit);
-    if (searchParam) {
-      dataRequest.input('search', sql.NVarChar, searchParam);
-    }
-    const dataResult = await dataRequest.query(dataQuery);
+    `);
 
     return {
       data: dataResult.recordset,
       total,
-      totalPages,
+      totalPages: Math.ceil(total / limit),
       currentPage: page,
+    };
+  }
+
+  /**
+   * ---------------------------------------------------------------------------
+   * Public — paginated list with optional search and filters.
+   *
+   * Two-phase search strategy (unchanged):
+   *
+   *   PHASE 1 — Prefix search `'term%'`. Uses the clustered PK index.
+   *   PHASE 2 — Fallback to substring `'%term%'` when PHASE 1 returned nothing.
+   *
+   * Filters are ANDed into both phases, so search + GL + Purchase Class +
+   * Category all combine into a single WHERE clause.
+   * ---------------------------------------------------------------------------
+   */
+  static async getAll(page = 1, limit = 50, search = '', filters = {}) {
+    await poolConnect;
+    const offset = (page - 1) * limit;
+    const trimmed = (search || '').trim();
+
+    // No search term — straight paginated list with filters.
+    if (!trimmed) {
+      return this._paginate({ offset, limit, page, pattern: null, filters });
+    }
+
+    // PHASE 1 — fast prefix search + filters.
+    const prefixPattern = trimmed + '%';
+    const fastResult = await this._paginate({
+      offset, limit, page, pattern: prefixPattern, filters,
+    });
+    if (fastResult.total > 0) {
+      return fastResult;
+    }
+
+    // PHASE 2 — slow substring fallback (only if PHASE 1 found nothing).
+    const containsPattern = '%' + trimmed + '%';
+    return this._paginate({
+      offset, limit, page, pattern: containsPattern, filters,
+    });
+  }
+
+  /**
+   * ---------------------------------------------------------------------------
+   * Distinct filter options for the Item Master filter bar.
+   * Returns GL classes (with descriptions), Purchase Classes, and Categories.
+   *
+   * These are deliberately unfiltered — the dropdown always shows the full
+   * universe of values so the user can switch between them freely.
+   * ---------------------------------------------------------------------------
+   */
+  static async getFilterOptions() {
+    await poolConnect;
+
+    const [glRes, pcRes, catRes] = await Promise.all([
+      pool.request().query(`
+        SELECT DISTINCT Gl_Class, Gl_Description
+          FROM item_master
+         WHERE Gl_Class IS NOT NULL
+         ORDER BY Gl_Class
+      `),
+      pool.request().query(`
+        SELECT DISTINCT Purchase_Class
+          FROM item_master
+         WHERE Purchase_Class IS NOT NULL
+           AND LTRIM(RTRIM(Purchase_Class)) <> ''
+         ORDER BY Purchase_Class
+      `),
+      pool.request().query(`
+        SELECT DISTINCT Category
+          FROM item_master
+         WHERE Category IS NOT NULL
+           AND LTRIM(RTRIM(Category)) <> ''
+         ORDER BY Category
+      `),
+    ]);
+
+    return {
+      gl_classes: glRes.recordset.map((r) => ({
+        value: String(r.Gl_Class),
+        label: r.Gl_Description
+          ? `${r.Gl_Class} — ${r.Gl_Description}`
+          : String(r.Gl_Class),
+      })),
+      purchase_classes: pcRes.recordset.map((r) => r.Purchase_Class),
+      categories:       catRes.recordset.map((r) => r.Category),
     };
   }
 
@@ -226,6 +359,23 @@ class ItemMasterModel {
     const request = pool.request();
     request.input('itemCode', sql.NVarChar, itemCode);
     await request.query('DELETE FROM item_master WHERE Item_Code = @itemCode');
+  }
+
+  /**
+   * ▸ NEW — Fetch all items for the offline sync payload.
+   */
+  static async getAllItemsForSync() {
+    await poolConnect;
+    const request = pool.request();
+    const result = await request.query(`
+      SELECT 
+        Item_Code, Item_Description, Uom_Code, Uom_Description,
+        Gl_Class, Gl_Description, Purchase_Class, Category,
+        List_Price_Per_Unit, Status, Barcode, Creation_Date
+      FROM item_master
+      WHERE Status = 'Active'
+    `);
+    return result.recordset;
   }
 }
 

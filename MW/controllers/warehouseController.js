@@ -1,5 +1,6 @@
 // controllers/warehouseController.js
 const WarehouseModel = require('../models/warehouseModel');
+const { clearUserCache } = require('../middleware/auth');
 
 const warehouseController = {
     /**
@@ -172,6 +173,20 @@ const warehouseController = {
                 updated_by: req.user?.username || 'System'
             });
 
+            // If the update changed the warehouse status (via the general
+            // update endpoint rather than the dedicated activate/deactivate
+            // endpoints), we need to invalidate the auth cache for every
+            // user assigned to this warehouse — otherwise their cached
+            // warehouse_status would serve stale data for up to 60 s.
+            const statusChanged = existingWarehouse.status !== status;
+            if (statusChanged) {
+                const affected = await require('../db').query(
+                    'SELECT id FROM user_table WHERE warehouse_assigned = @param0',
+                    [id]
+                );
+                affected.forEach((row) => clearUserCache(row.id));
+            }
+
             const updatedWarehouse = await WarehouseModel.getWarehouseById(id);
 
             res.status(200).json({
@@ -190,8 +205,13 @@ const warehouseController = {
     },
 
     /**
-     * Deactivate warehouse (soft delete)
+     * Deactivate warehouse (soft delete).
      * PATCH /api/warehouses/:id/deactivate
+     *
+     * Side effect: every user assigned to this warehouse is signed out
+     * immediately. Their active_session_token is wiped, and the auth
+     * cache for each user is cleared so the next request re-reads the
+     * fresh warehouse_status.
      */
     deactivateWarehouse: async (req, res) => {
         try {
@@ -215,14 +235,24 @@ const warehouseController = {
                 });
             }
 
-            await WarehouseModel.deactivateWarehouse(id, updated_by);
+            const { affectedUserIds } = await WarehouseModel.deactivateWarehouse(id, updated_by);
+
+            // Drop the auth cache so the next request from each affected
+            // user hits a fresh DB read and sees the deactivated warehouse.
+            affectedUserIds.forEach((uid) => clearUserCache(uid));
 
             const updatedWarehouse = await WarehouseModel.getWarehouseById(id);
+
+            console.log(
+                `🔒 Warehouse ${existingWarehouse.warehouse_code} deactivated — ` +
+                `${affectedUserIds.length} user session(s) cleared.`
+            );
 
             res.status(200).json({
                 success: true,
                 message: 'Warehouse deactivated successfully',
-                data: updatedWarehouse
+                data: updatedWarehouse,
+                affectedUsers: affectedUserIds.length
             });
         } catch (error) {
             console.error('❌ Error deactivating warehouse:', error);
@@ -260,7 +290,11 @@ const warehouseController = {
                 });
             }
 
-            await WarehouseModel.activateWarehouse(id, updated_by);
+            const { affectedUserIds } = await WarehouseModel.activateWarehouse(id, updated_by);
+
+            // Clear the cache so users assigned here aren't blocked by a
+            // stale 'Deactivated' entry for up to 60 s.
+            affectedUserIds.forEach((uid) => clearUserCache(uid));
 
             const updatedWarehouse = await WarehouseModel.getWarehouseById(id);
 

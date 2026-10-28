@@ -227,7 +227,22 @@ const WarehouseModel = {
     },
 
     /**
-     * Deactivate warehouse (soft delete)
+     * Deactivate warehouse (soft delete).
+     *
+     * Two things happen here:
+     *   1. The warehouse row is flipped to 'Deactivated'.
+     *   2. Every user assigned to that warehouse has their active session
+     *      wiped, so their very next API call fails with SESSION_REVOKED
+     *      and the client redirects them to /login.
+     *
+     * The auth middleware's warehouse-status check is a safety net in case
+     * this session-wipe ever fails mid-transaction (DB hiccup, race). Both
+     * paths lead to the same outcome — the user is signed out immediately,
+     * not in 24 hours.
+     *
+     * Returns { affectedUserIds } so the controller can clear the auth
+     * cache for each of them (the cached entry still has warehouse_status
+     * = 'Active' and would otherwise serve stale data for up to 60 s).
      */
     deactivateWarehouse: async (id, updated_by) => {
         try {
@@ -239,7 +254,28 @@ const WarehouseModel = {
                 WHERE warehouse_id = @param1
             `, [updated_by || 'System', id]);
 
-            return true;
+            // Collect every user assigned to this warehouse. We clear the
+            // cache for ALL of them (not just those with a live session),
+            // because the cached row now carries a stale warehouse_status.
+            const affected = await query(
+                'SELECT id FROM user_table WHERE warehouse_assigned = @param0',
+                [id]
+            );
+            const affectedUserIds = affected.map((r) => r.id);
+
+            // Kill live sessions in bulk. A single UPDATE is enough — no
+            // need to loop, and no per-user state to track.
+            if (affectedUserIds.length > 0) {
+                await query(`
+                    UPDATE user_table SET
+                        active_session_token     = NULL,
+                        active_session_at        = NULL,
+                        active_session_last_seen = NULL
+                    WHERE warehouse_assigned = @param0
+                `, [id]);
+            }
+
+            return { affectedUserIds };
         } catch (error) {
             console.error(`❌ Error in deactivateWarehouse for ID ${id}:`, error);
             throw error;
@@ -247,7 +283,11 @@ const WarehouseModel = {
     },
 
     /**
-     * Activate warehouse
+     * Activate warehouse.
+     *
+     * Returns { affectedUserIds } so the controller can clear the auth
+     * cache for each — otherwise the cached 'Deactivated' status would
+     * keep rejecting them for up to 60 s after reactivation.
      */
     activateWarehouse: async (id, updated_by) => {
         try {
@@ -259,7 +299,12 @@ const WarehouseModel = {
                 WHERE warehouse_id = @param1
             `, [updated_by || 'System', id]);
 
-            return true;
+            const affected = await query(
+                'SELECT id FROM user_table WHERE warehouse_assigned = @param0',
+                [id]
+            );
+
+            return { affectedUserIds: affected.map((r) => r.id) };
         } catch (error) {
             console.error(`❌ Error in activateWarehouse for ID ${id}:`, error);
             throw error;

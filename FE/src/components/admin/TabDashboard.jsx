@@ -1,22 +1,33 @@
 // src/components/admin/TabDashboard.jsx
 import React, { useEffect, useMemo } from 'react';
+import {
+  FiPackage,
+  FiHome,
+  FiInbox,
+  FiAlertTriangle,
+  FiImage,
+  FiBarChart2,
+  FiCalendar,
+  FiTool,
+  FiChevronLeft,
+  FiChevronRight,
+  FiTrendingUp,
+} from 'react-icons/fi';
 
-const TabDashboard = ({ adminData }) => {
+const TabDashboard = ({ adminData, onNavigate = () => {} }) => {
   const {
     dashboardItems,
     dashboardTotalCount,
     dashboardItemIndex,
     setDashboardItemIndex,
     warehouses,
-    users,
-    addedItems,
     highlightedClass,
     setHighlightedClass,
     generateBarcodeDataUrl,
     prevDashboardItem,
     nextDashboardItem,
-    handleExportMonthly,
     fetchItemMastersForDashboard,
+    damagedItemsCount,
   } = adminData;
 
   useEffect(() => {
@@ -43,8 +54,7 @@ const TabDashboard = ({ adminData }) => {
       created.setHours(0, 0, 0, 0);
       return created.getTime() === today.getTime();
     }).length;
-    const damagedItems = dashboardItems.filter(item => item.Status === 'Inactive').length;
-    return { totalItems, totalWarehouses, itemsAddedToday, damagedItems };
+    return { totalItems, totalWarehouses, itemsAddedToday };
   }, [dashboardItems, warehouses]);
 
   const yearlyData = useMemo(() => {
@@ -95,48 +105,87 @@ const TabDashboard = ({ adminData }) => {
 
   const totalClassItems = classPieData.reduce((sum, d) => sum + d.count, 0);
 
-  const registrarUsernames = (users || [])
-    .filter(u => u.user_role === 'Registrar')
-    .map(u => u.username || u.email || '');
-  const fallbackRegistrarNames = ['RegistrarUser', 'reg_user', 'registrar1'];
-  const allRegistrarNames = [...registrarUsernames, ...fallbackRegistrarNames];
-  const damagedItemsLegacy = (addedItems || []).filter(item =>
-    item.status === 'Damaged' &&
-    allRegistrarNames.some(name => item.added_by?.toLowerCase().includes(name.toLowerCase()))
-  );
+  // ---------- Card → tab navigation ----------
+  const goToTab = (tabId) => {
+    if (typeof onNavigate === 'function') onNavigate(tabId);
+  };
+
+  // Keyboard support for the clickable cards
+  const handleCardKey = (tabId) => (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      goToTab(tabId);
+    }
+  };
+
+  const damagedCount = Number(damagedItemsCount) || 0;
 
   return (
     <div className="dashboard-wrapper">
+      <style>{tabDashboardIconCss}</style>
 
       <div className="stats-grid">
-        <div className="stat-card clickable">
-          <div className="stat-icon">📦</div>
+        {/* Total Items → Item Masters tab */}
+        <div
+          className="stat-card stat-card--total clickable"
+          role="button"
+          tabIndex={0}
+          aria-label="View Item Masters"
+          title="View Item Masters"
+          onClick={() => goToTab('itemmasters')}
+          onKeyDown={handleCardKey('itemmasters')}
+        >
+          <div className="stat-icon"><FiPackage /></div>
           <div className="stat-info">
             <span className="stat-value">{computedStats.totalItems}</span>
             <span className="stat-label">Total Items</span>
           </div>
         </div>
-        <div className="stat-card clickable">
-          <div className="stat-icon">🏭</div>
+
+        {/* Warehouses → Warehouse tab */}
+        <div
+          className="stat-card stat-card--warehouses clickable"
+          role="button"
+          tabIndex={0}
+          aria-label="View Warehouses"
+          title="View Warehouses"
+          onClick={() => goToTab('warehouse')}
+          onKeyDown={handleCardKey('warehouse')}
+        >
+          <div className="stat-icon"><FiHome /></div>
           <div className="stat-info">
             <span className="stat-value">{computedStats.totalWarehouses}</span>
             <span className="stat-label">Warehouses</span>
           </div>
         </div>
-        <div className="stat-card clickable">
-          <div className="stat-icon">📥</div>
+
+        {/* Added Today — informational only (no destination tab) */}
+        <div className="stat-card stat-card--today">
+          <div className="stat-icon"><FiInbox /></div>
           <div className="stat-info">
             <span className="stat-value">{computedStats.itemsAddedToday}</span>
             <span className="stat-label">Added Today</span>
           </div>
         </div>
-        <div className="stat-card clickable">
-          <div className="stat-icon">⚠️</div>
+
+        {/* Damaged Items → Damaged Items tab */}
+        <div
+          className={`stat-card stat-card--danger clickable${damagedCount > 0 ? ' is-alert' : ''}`}
+          role="button"
+          tabIndex={0}
+          aria-label="View Damaged Items"
+          title="View Damaged Items"
+          onClick={() => goToTab('damageditems')}
+          onKeyDown={handleCardKey('damageditems')}
+        >
+          <div className={`stat-icon ${damagedCount > 0 ? 'stat-icon--danger' : ''}`}>
+            <FiAlertTriangle />
+          </div>
           <div className="stat-info">
-            <span className="stat-value" style={{ color: computedStats.damagedItems > 0 ? '#ef4444' : '#1a1f26' }}>
-              {computedStats.damagedItems}
+            <span className="stat-value" style={{ color: damagedCount > 0 ? '#ef4444' : '#1a1f26' }}>
+              {damagedCount}
             </span>
-            <span className="stat-label">Inactive Items</span>
+            <span className="stat-label">Damaged Items</span>
           </div>
         </div>
       </div>
@@ -146,7 +195,10 @@ const TabDashboard = ({ adminData }) => {
 
           <div className="item-view-card">
             <div className="item-view-header">
-              <h4>🖼️ Item Preview</h4>
+              <h4>
+                <FiImage className="tab-heading-icon" />
+                Item Preview
+              </h4>
               <span className="item-view-count">
                 {totalItems > 0 ? `${dashboardItemIndex + 1} / ${totalItems}` : 'No items'}
               </span>
@@ -157,7 +209,7 @@ const TabDashboard = ({ adminData }) => {
                   {currentItem.Item_Image ? (
                     <img src={currentItem.Item_Image} alt={currentItem.Item_Code} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                   ) : (
-                    <span>📦</span>
+                    <FiPackage />
                   )}
                 </div>
                 <div className="item-view-details">
@@ -190,9 +242,13 @@ const TabDashboard = ({ adminData }) => {
                     </div>
                   )}
                   <div className="item-view-nav">
-                    <button className="nav-btn" onClick={prevDashboardItem} disabled={totalItems <= 1}>◀ Prev</button>
+                    <button className="nav-btn" onClick={prevDashboardItem} disabled={totalItems <= 1}>
+                      <FiChevronLeft className="nav-btn-icon" /> Prev
+                    </button>
                     <span className="item-index">{dashboardItemIndex + 1} / {totalItems}</span>
-                    <button className="nav-btn" onClick={nextDashboardItem} disabled={totalItems <= 1}>Next ▶</button>
+                    <button className="nav-btn" onClick={nextDashboardItem} disabled={totalItems <= 1}>
+                      Next <FiChevronRight className="nav-btn-icon" />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -202,7 +258,10 @@ const TabDashboard = ({ adminData }) => {
           </div>
 
           <div className="class-pie-card">
-            <h4>📊 Items by Class</h4>
+            <h4>
+              <FiBarChart2 className="tab-heading-icon" />
+              Items by Class
+            </h4>
             {classPieData.length > 0 ? (
               <div className="pie-chart-container">
                 <div className="pie-chart-wrapper">
@@ -263,7 +322,7 @@ const TabDashboard = ({ adminData }) => {
                     </div>
                   ))}
                   {highlightedClass && (
-                    <div className="clear-highlight" onClick={() => setHighlightedClass(null)}>✕ Clear</div>
+                    <div className="clear-highlight" onClick={() => setHighlightedClass(null)}>Clear</div>
                   )}
                 </div>
               </div>
@@ -271,58 +330,39 @@ const TabDashboard = ({ adminData }) => {
               <div className="no-items-message">No class data available.</div>
             )}
           </div>
-
-          <div className="damaged-items-card">
-            <h4>⚠️ Damaged Items (Registrar)</h4>
-            {damagedItemsLegacy.length > 0 ? (
-              <div className="damaged-items-list">
-                {damagedItemsLegacy.slice(0, 5).map(item => (
-                  <div key={item.id} className="damaged-item">
-                    <span className="damaged-item-name">{item.item_name}</span>
-                    <span className="damaged-item-code">{item.item_code}</span>
-                    <span className="damaged-item-qty">Qty: {item.quantity}</span>
-                    <span className="damaged-item-by">by {item.added_by}</span>
-                    {item.damageReason && <span className="damaged-item-reason">Reason: {item.damageReason}</span>}
-                  </div>
-                ))}
-                {damagedItemsLegacy.length > 5 && (
-                  <div className="damaged-more">+ {damagedItemsLegacy.length - 5} more</div>
-                )}
-              </div>
-            ) : (
-              <div className="no-items-message" style={{ padding: '12px 0' }}>No damaged items from registrar.</div>
-            )}
-          </div>
         </div>
 
         <div className="main-right">
+          {/* --------------------------------------------------------
+              Reporting widgets placeholder.
+
+              Release trends, receive trends, and monthly exports are
+              not yet wired to a backend aggregation endpoint. Rather
+              than render charts that always show zero, we show an
+              honest placeholder so users know these are on the way.
+             -------------------------------------------------------- */}
           <div className="chart-card">
-            <h4>📈 Releases This Month (Weekly)</h4>
-            <div className="chart-placeholder">
-              <div className="line-chart">
-                {[0, 0, 0, 0].map((value, index) => (
-                  <div key={index} className="line-chart-point">
-                    <div className="line-chart-bar" style={{ height: '0%' }}>
-                      <span className="line-chart-value">0</span>
-                    </div>
-                    <span className="line-chart-label">Week {index + 1}</span>
-                  </div>
-                ))}
+            <h4>
+              <FiTrendingUp className="tab-heading-icon" />
+              More Reports Coming Soon
+            </h4>
+            <div
+              style={{
+                padding: '32px 20px',
+                textAlign: 'center',
+                color: '#7a8699',
+                fontSize: 13,
+                lineHeight: 1.6,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12, color: '#94a3b8' }}>
+                <FiTool size={42} strokeWidth={1.5} />
               </div>
-            </div>
-          </div>
-          <div className="chart-card">
-            <h4>📥 Received This Month (Weekly)</h4>
-            <div className="chart-placeholder">
-              <div className="line-chart">
-                {[0, 0, 0, 0].map((value, index) => (
-                  <div key={index} className="line-chart-point">
-                    <div className="line-chart-bar" style={{ height: '0%' }}>
-                      <span className="line-chart-value">0</span>
-                    </div>
-                    <span className="line-chart-label">Week {index + 1}</span>
-                  </div>
-                ))}
+              <div style={{ fontWeight: 600, color: '#1a1f26', marginBottom: 6 }}>
+                Under development
+              </div>
+              <div>
+                Weekly release and receive trends, plus monthly PDF/Excel exports, will appear here once the reporting pipeline is ready.
               </div>
             </div>
           </div>
@@ -331,8 +371,10 @@ const TabDashboard = ({ adminData }) => {
 
       <div className="yearly-report-section">
         <div className="yearly-header">
-          <h3>📅 Yearly Overview ({new Date().getFullYear()})</h3>
-          <button className="export-btn daily" onClick={handleExportMonthly}>📊 Export Monthly Report</button>
+          <h3>
+            <FiCalendar className="tab-heading-icon" />
+            Yearly Overview ({new Date().getFullYear()})
+          </h3>
         </div>
         <div className="yearly-chart-container">
           {hasYearlyData ? (
@@ -380,3 +422,51 @@ const TabDashboard = ({ adminData }) => {
 };
 
 export default TabDashboard;
+
+// ============================================================
+// Icon styling — dark icons on white cards, tinted on state.
+// ============================================================
+const tabDashboardIconCss = `
+.dashboard-wrapper .tab-heading-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  margin-right: 8px;
+  vertical-align: -0.15em;
+  color: #1a1f26;
+}
+.dashboard-wrapper .tab-heading-icon svg {
+  width: 100%;
+  height: 100%;
+  stroke-width: 2.2;
+}
+
+.dashboard-wrapper .item-view-image svg {
+  width: 1em;
+  height: 1em;
+  stroke-width: 1.5;
+  color: #a0a8b0;
+}
+
+.dashboard-wrapper .nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.dashboard-wrapper .nav-btn-icon {
+  width: 1em;
+  height: 1em;
+  stroke-width: 2.4;
+}
+.dashboard-wrapper .nav-btn-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-width: 480px) {
+  .dashboard-wrapper .tab-heading-icon { margin-right: 6px; }
+}
+`;

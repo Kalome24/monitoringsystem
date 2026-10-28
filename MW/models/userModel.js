@@ -1,16 +1,74 @@
 // models/userModel.js
 const { query } = require('../db');
 
+/* ============================================================
+   BODEGA ASSIGNMENT HELPERS
+   ============================================================ */
+
+const ASSIGNED_BODEGAS_SQL = `
+  (
+    SELECT STRING_AGG(locator_code, ',') WITHIN GROUP (ORDER BY locator_code)
+    FROM dbo.user_bodega_assignments
+    WHERE user_id = u.id
+  ) AS assigned_bodegas_csv
+`;
+
+const parseAssignments = (row) => {
+    if (!row) return row;
+    const csv = row.assigned_bodegas_csv;
+    delete row.assigned_bodegas_csv;
+    return {
+        ...row,
+        assigned_bodegas: csv ? String(csv).split(',').filter(Boolean) : [],
+    };
+};
+
 const UserModel = {
     /* ============================================================
-       READ — every user SELECT now returns profile_image and the
-       is_currently_logged_in flag so the frontend can show status.
+       READ
        ============================================================ */
+
+    getUserBodegaAssignments: async (userId) => {
+        try {
+            const rows = await query(
+                `SELECT locator_code, warehouse_code
+                   FROM dbo.user_bodega_assignments
+                  WHERE user_id = @param0
+                  ORDER BY locator_code`,
+                [userId]
+            );
+            return rows;
+        } catch (error) {
+            console.error(`❌ Error in getUserBodegaAssignments for ID ${userId}:`, error);
+            throw error;
+        }
+    },
+
+    /**
+     * Returns null when the caller should see EVERY locator in the
+     * warehouse (admins, non-handlers, or handlers with no assignments).
+     * Returns an array of locator codes when the caller should be scoped.
+     *
+     * Callers pass a fully-hydrated user row (with user_role +
+     * emp_position + id + warehouse_assigned).
+     */
+    getAssignedLocatorsForUser: async (user) => {
+        if (!user) return null;
+        const role = String(user.user_role || '').trim();
+        const pos  = String(user.emp_position || '').trim();
+
+        if (role === 'Admin' || role === 'Super Admin') return null;
+        if (pos !== 'Underground Handler') return null;
+
+        const assignments = await UserModel.getUserBodegaAssignments(user.id);
+        if (!assignments || assignments.length === 0) return null;
+        return assignments.map((a) => a.locator_code);
+    },
 
     getAllUsers: async () => {
         try {
             const rows = await query(`
-                SELECT 
+                SELECT
                     u.id,
                     u.public_user_id,
                     u.username,
@@ -23,14 +81,17 @@ const UserModel = {
                     u.warehouse_assigned,
                     u.email,
                     u.status,
-                    u.profile_image,
+                    CASE WHEN u.profile_image IS NOT NULL THEN 1 ELSE 0 END AS has_profile_image,
                     u.active_session_token,
                     u.active_session_at,
+                    u.active_session_last_seen,
+                    u.password_changed_at,
                     u.created_at,
                     u.created_by,
                     u.updated_at,
                     u.updated_by,
                     u.last_login,
+                    ${ASSIGNED_BODEGAS_SQL},
                     w.warehouse_code,
                     w.warehouse_name AS warehouse_name,
                     w.warehouse_location,
@@ -45,7 +106,7 @@ const UserModel = {
                 LEFT JOIN warehouse_table w ON u.warehouse_assigned = w.warehouse_id
                 ORDER BY u.id
             `);
-            return rows;
+            return rows.map(parseAssignments);
         } catch (error) {
             console.error('❌ Error in getAllUsers:', error);
             throw error;
@@ -55,7 +116,7 @@ const UserModel = {
     getUserById: async (id) => {
         try {
             const rows = await query(`
-                SELECT 
+                SELECT
                     u.id,
                     u.public_user_id,
                     u.username,
@@ -71,11 +132,14 @@ const UserModel = {
                     u.profile_image,
                     u.active_session_token,
                     u.active_session_at,
+                    u.active_session_last_seen,
+                    u.password_changed_at,
                     u.created_at,
                     u.created_by,
                     u.updated_at,
                     u.updated_by,
                     u.last_login,
+                    ${ASSIGNED_BODEGAS_SQL},
                     w.warehouse_code,
                     w.warehouse_name AS warehouse_name,
                     w.warehouse_location,
@@ -90,7 +154,7 @@ const UserModel = {
                 LEFT JOIN warehouse_table w ON u.warehouse_assigned = w.warehouse_id
                 WHERE u.id = @param0
             `, [id]);
-            return rows[0];
+            return parseAssignments(rows[0]);
         } catch (error) {
             console.error(`❌ Error in getUserById for ID ${id}:`, error);
             throw error;
@@ -100,7 +164,7 @@ const UserModel = {
     getUserByPublicId: async (publicUserId) => {
         try {
             const rows = await query(`
-                SELECT 
+                SELECT
                     u.id,
                     u.public_user_id,
                     u.username,
@@ -116,11 +180,14 @@ const UserModel = {
                     u.profile_image,
                     u.active_session_token,
                     u.active_session_at,
+                    u.active_session_last_seen,
+                    u.password_changed_at,
                     u.created_at,
                     u.created_by,
                     u.updated_at,
                     u.updated_by,
                     u.last_login,
+                    ${ASSIGNED_BODEGAS_SQL},
                     w.warehouse_code,
                     w.warehouse_name AS warehouse_name,
                     w.warehouse_location,
@@ -135,22 +202,17 @@ const UserModel = {
                 LEFT JOIN warehouse_table w ON u.warehouse_assigned = w.warehouse_id
                 WHERE u.public_user_id = @param0
             `, [publicUserId]);
-            return rows[0];
+            return parseAssignments(rows[0]);
         } catch (error) {
             console.error(`❌ Error in getUserByPublicId for ${publicUserId}:`, error);
             throw error;
         }
     },
 
-    /**
-     * Get user by username (used during login)
-     * Includes active session columns so the login controller can
-     * enforce the single-session rule.
-     */
     getUserByUsername: async (username) => {
         try {
             const rows = await query(`
-                SELECT 
+                SELECT
                     u.id,
                     u.public_user_id,
                     u.username,
@@ -166,11 +228,14 @@ const UserModel = {
                     u.profile_image,
                     u.active_session_token,
                     u.active_session_at,
+                    u.active_session_last_seen,
+                    u.password_changed_at,
                     u.created_at,
                     u.created_by,
                     u.updated_at,
                     u.updated_by,
                     u.last_login,
+                    ${ASSIGNED_BODEGAS_SQL},
                     w.warehouse_code,
                     w.warehouse_name AS warehouse_name,
                     w.warehouse_location,
@@ -179,7 +244,7 @@ const UserModel = {
                 LEFT JOIN warehouse_table w ON u.warehouse_assigned = w.warehouse_id
                 WHERE u.username = @param0
             `, [username]);
-            return rows[0];
+            return parseAssignments(rows[0]);
         } catch (error) {
             console.error(`❌ Error in getUserByUsername for ${username}:`, error);
             throw error;
@@ -199,6 +264,19 @@ const UserModel = {
         }
     },
 
+    usernameExistsExcept: async (username, excludeId) => {
+        try {
+            const rows = await query(
+                'SELECT id FROM user_table WHERE username = @param0 AND id <> @param1',
+                [username, excludeId]
+            );
+            return rows.length > 0;
+        } catch (error) {
+            console.error(`❌ Error in usernameExistsExcept for ${username}:`, error);
+            throw error;
+        }
+    },
+
     emailExists: async (email) => {
         try {
             const rows = await query(
@@ -208,6 +286,19 @@ const UserModel = {
             return rows.length > 0;
         } catch (error) {
             console.error(`❌ Error in emailExists for ${email}:`, error);
+            throw error;
+        }
+    },
+
+    emailExistsExcept: async (email, excludeId) => {
+        try {
+            const rows = await query(
+                'SELECT id FROM user_table WHERE email = @param0 AND id <> @param1',
+                [email, excludeId]
+            );
+            return rows.length > 0;
+        } catch (error) {
+            console.error(`❌ Error in emailExistsExcept for ${email}:`, error);
             throw error;
         }
     },
@@ -228,7 +319,7 @@ const UserModel = {
     getUsersByStatus: async (status) => {
         try {
             const rows = await query(`
-                SELECT 
+                SELECT
                     u.id,
                     u.public_user_id,
                     u.username,
@@ -241,7 +332,8 @@ const UserModel = {
                     u.warehouse_assigned,
                     u.email,
                     u.status,
-                    u.profile_image,
+                    CASE WHEN u.profile_image IS NOT NULL THEN 1 ELSE 0 END AS has_profile_image,
+                    ${ASSIGNED_BODEGAS_SQL},
                     w.warehouse_code,
                     w.warehouse_name AS warehouse_name,
                     w.status AS warehouse_status,
@@ -256,9 +348,84 @@ const UserModel = {
                 WHERE u.status = @param0
                 ORDER BY u.last_name, u.first_name
             `, [status]);
-            return rows;
+            return rows.map(parseAssignments);
         } catch (error) {
             console.error(`❌ Error in getUsersByStatus for status ${status}:`, error);
+            throw error;
+        }
+    },
+
+    getDepartmentHeads: async () => {
+        try {
+            const rows = await query(`
+                SELECT
+                    u.id,
+                    u.username,
+                    u.email,
+                    u.first_name,
+                    u.last_name,
+                    u.emp_position
+                FROM user_table u
+                WHERE u.user_role = 'Admin'
+                  AND (u.emp_position = 'Department Head' OR u.can_approve_sts = 1)
+                  AND u.status     = 'Active'
+                  AND u.email IS NOT NULL
+                  AND LTRIM(RTRIM(u.email)) <> ''
+                ORDER BY u.id
+            `);
+            return rows;
+        } catch (error) {
+            console.error('❌ Error in getDepartmentHeads:', error);
+            throw error;
+        }
+    },
+
+    getAdminsAndSuperAdmins: async () => {
+        try {
+            const rows = await query(`
+                SELECT
+                    u.id,
+                    u.username,
+                    u.email,
+                    u.first_name,
+                    u.last_name,
+                    u.user_role
+                FROM user_table u
+                WHERE u.user_role IN ('Admin', 'Super Admin')
+                  AND u.status     = 'Active'
+                  AND u.email IS NOT NULL
+                  AND LTRIM(RTRIM(u.email)) <> ''
+                ORDER BY u.id
+            `);
+            return rows;
+        } catch (error) {
+            console.error('❌ Error in getAdminsAndSuperAdmins:', error);
+            throw error;
+        }
+    },
+
+    getHandlersByWarehouseId: async (warehouseId) => {
+        try {
+            if (warehouseId == null || warehouseId === '') return [];
+            const rows = await query(`
+                SELECT
+                    u.id,
+                    u.username,
+                    u.email,
+                    u.first_name,
+                    u.last_name,
+                    u.warehouse_assigned
+                FROM user_table u
+                WHERE u.user_role          = 'Stock Handler'
+                  AND u.status             = 'Active'
+                  AND u.warehouse_assigned = @param0
+                  AND u.email IS NOT NULL
+                  AND LTRIM(RTRIM(u.email)) <> ''
+                ORDER BY u.id
+            `, [Number(warehouseId)]);
+            return rows;
+        } catch (error) {
+            console.error(`❌ Error in getHandlersByWarehouseId for ${warehouseId}:`, error);
             throw error;
         }
     },
@@ -266,7 +433,7 @@ const UserModel = {
     searchUsers: async (searchTerm) => {
         try {
             const rows = await query(`
-                SELECT 
+                SELECT
                     u.id,
                     u.public_user_id,
                     u.username,
@@ -279,9 +446,10 @@ const UserModel = {
                     u.warehouse_assigned,
                     u.email,
                     u.status,
-                    u.profile_image,
+                    CASE WHEN u.profile_image IS NOT NULL THEN 1 ELSE 0 END AS has_profile_image,
                     u.created_at,
                     u.created_by,
+                    ${ASSIGNED_BODEGAS_SQL},
                     w.warehouse_code,
                     w.warehouse_name AS warehouse_name,
                     w.status AS warehouse_status,
@@ -301,7 +469,7 @@ const UserModel = {
                    OR u.emp_position LIKE '%' + @param0 + '%'
                 ORDER BY u.last_name, u.first_name
             `, [searchTerm]);
-            return rows;
+            return rows.map(parseAssignments);
         } catch (error) {
             console.error(`❌ Error in searchUsers for term "${searchTerm}":`, error);
             throw error;
@@ -344,12 +512,14 @@ const UserModel = {
                     email,
                     status,
                     created_by,
-                    public_user_id
+                    public_user_id,
+                    password_changed_at
                 )
                 VALUES (
-                    @param0, @param1, @param2, @param3, 
-                    @param4, @param5, @param6, @param7, 
-                    @param8, @param9, @param10, @param11
+                    @param0, @param1, @param2, @param3,
+                    @param4, @param5, @param6, @param7,
+                    @param8, @param9, @param10, @param11,
+                    GETDATE()
                 );
                 SELECT SCOPE_IDENTITY() AS id;
             `, [
@@ -414,6 +584,7 @@ const UserModel = {
             if (password_hash) {
                 updates.push(`password_hash = @param${params.length}`);
                 params.push(password_hash);
+                updates.push(`password_changed_at = GETDATE()`);
             }
 
             updates.push(`updated_at = GETDATE()`);
@@ -433,11 +604,51 @@ const UserModel = {
         }
     },
 
+    updateSelf: async (userId, fields) => {
+        try {
+            const {
+                first_name,
+                last_name,
+                username,
+                email,
+                password_hash,
+                updated_by
+            } = fields;
+
+            const updates = [];
+            const params = [];
+
+            updates.push(`first_name = @param${params.length}`);  params.push(first_name);
+            updates.push(`last_name = @param${params.length}`);   params.push(last_name);
+            updates.push(`username = @param${params.length}`);    params.push(username);
+            updates.push(`email = @param${params.length}`);       params.push(email);
+            updates.push(`updated_by = @param${params.length}`);  params.push(updated_by);
+
+            if (password_hash) {
+                updates.push(`password_hash = @param${params.length}`);        params.push(password_hash);
+                updates.push(`password_changed_at = GETDATE()`);
+            }
+
+            updates.push(`updated_at = GETDATE()`);
+            params.push(userId);
+
+            await query(
+                `UPDATE user_table SET ${updates.join(', ')} WHERE id = @param${params.length - 1}`,
+                params
+            );
+            return true;
+        } catch (error) {
+            console.error(`❌ Error in updateSelf for ID ${userId}:`, error);
+            throw error;
+        }
+    },
+
     updatePassword: async (id, password_hash, updated_by) => {
         try {
             await query(`
                 UPDATE user_table SET
                     password_hash = @param0,
+                    password_changed_at = GETDATE(),
                     updated_at = GETDATE(),
                     updated_by = @param1
                 WHERE id = @param2
@@ -464,9 +675,6 @@ const UserModel = {
         }
     },
 
-    /**
-     * Update the user's profile image (base64 data URL).
-     */
     updateProfileImage: async (id, profileImage) => {
         try {
             await query(`
@@ -482,10 +690,6 @@ const UserModel = {
         }
     },
 
-    /**
-     * Deactivate user — also clears any active session so a
-     * deactivated account cannot remain logged in.
-     */
     deactivateUser: async (id, updated_by) => {
         try {
             await query(`
@@ -493,6 +697,7 @@ const UserModel = {
                     status = 'Inactive',
                     active_session_token = NULL,
                     active_session_at = NULL,
+                    active_session_last_seen = NULL,
                     updated_at = GETDATE(),
                     updated_by = @param0
                 WHERE id = @param1
@@ -523,17 +728,48 @@ const UserModel = {
     },
 
     /* ============================================================
-       SESSION MANAGEMENT — single active login per user
+       BODEGA ASSIGNMENT WRITE
        ============================================================ */
 
     /**
-     * Read the raw active session info for a user.
-     * @returns {Promise<{token: string, startedAt: Date}|null>}
+     * Replace all bodega assignments for a user.
+     * locatorCodes: array of strings (may be empty).
+     * warehouseCode: the user's assigned warehouse_code.
      */
+    setUserBodegaAssignments: async (userId, locatorCodes, warehouseCode, assignedBy) => {
+        try {
+            // Wipe existing
+            await query(`DELETE FROM dbo.user_bodega_assignments WHERE user_id = @param0`, [userId]);
+
+            if (!Array.isArray(locatorCodes) || locatorCodes.length === 0) return true;
+            if (!warehouseCode) throw new Error('warehouse_code is required to save bodega assignments.');
+
+            const unique = Array.from(new Set(locatorCodes.map(c => String(c).trim()).filter(Boolean)));
+
+            for (const code of unique) {
+                await query(`
+                    INSERT INTO dbo.user_bodega_assignments
+                        (user_id, warehouse_code, locator_code, assigned_by)
+                    VALUES
+                        (@param0, @param1, @param2, @param3)
+                `, [userId, warehouseCode, code, assignedBy || null]);
+            }
+
+            return true;
+        } catch (error) {
+            console.error(`❌ Error in setUserBodegaAssignments for ID ${userId}:`, error);
+            throw error;
+        }
+    },
+
+    /* ============================================================
+       SESSION MANAGEMENT
+       ============================================================ */
+
     getActiveSessionInfo: async (userId) => {
         try {
             const rows = await query(
-                `SELECT active_session_token, active_session_at
+                `SELECT active_session_token, active_session_at, active_session_last_seen
                  FROM user_table
                  WHERE id = @param0`,
                 [userId]
@@ -542,7 +778,8 @@ const UserModel = {
             if (!row || !row.active_session_token) return null;
             return {
                 token: row.active_session_token,
-                startedAt: row.active_session_at
+                startedAt: row.active_session_at,
+                lastSeenAt: row.active_session_last_seen
             };
         } catch (error) {
             console.error(`❌ Error in getActiveSessionInfo for ID ${userId}:`, error);
@@ -550,15 +787,13 @@ const UserModel = {
         }
     },
 
-    /**
-     * Store the JWT as the user's active session (called on login).
-     */
     setActiveSession: async (userId, token) => {
         try {
             await query(
                 `UPDATE user_table
-                 SET active_session_token = @param0,
-                     active_session_at = GETDATE()
+                 SET active_session_token     = @param0,
+                     active_session_at        = GETDATE(),
+                     active_session_last_seen = GETDATE()
                  WHERE id = @param1`,
                 [token, userId]
             );
@@ -569,16 +804,13 @@ const UserModel = {
         }
     },
 
-    /**
-     * Clear the user's active session.
-     * Used on logout, deactivate, force-logout, and stale sweep.
-     */
     clearActiveSession: async (userId) => {
         try {
             await query(
                 `UPDATE user_table
-                 SET active_session_token = NULL,
-                     active_session_at = NULL
+                 SET active_session_token     = NULL,
+                     active_session_at        = NULL,
+                     active_session_last_seen = NULL
                  WHERE id = @param0`,
                 [userId]
             );
@@ -589,15 +821,28 @@ const UserModel = {
         }
     },
 
-    /**
-     * Housekeeping — clear all sessions older than 24 hours.
-     */
+    touchActiveSession: async (userId) => {
+        try {
+            await query(
+                `UPDATE user_table
+                 SET active_session_last_seen = GETDATE()
+                 WHERE id = @param0`,
+                [userId]
+            );
+            return true;
+        } catch (error) {
+            console.error(`❌ Error in touchActiveSession for ID ${userId}:`, error);
+            throw error;
+        }
+    },
+
     sweepStaleSessions: async () => {
         try {
             await query(
                 `UPDATE user_table
-                 SET active_session_token = NULL,
-                     active_session_at = NULL
+                 SET active_session_token     = NULL,
+                     active_session_at        = NULL,
+                     active_session_last_seen = NULL
                  WHERE active_session_token IS NOT NULL
                    AND active_session_at IS NOT NULL
                    AND DATEDIFF(HOUR, active_session_at, GETDATE()) >= 24`

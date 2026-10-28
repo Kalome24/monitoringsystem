@@ -14,9 +14,11 @@ const Sidebar = ({
   const sidebarRef = useRef(null);
   const { can } = usePermissions();
 
+  // Close on outside click — mobile only.
   useEffect(() => {
+    if (!isMobile || !isOpen) return;
     const handleClickOutside = (e) => {
-      if (isMobile && isOpen && sidebarRef.current && !sidebarRef.current.contains(e.target)) {
+      if (sidebarRef.current && !sidebarRef.current.contains(e.target)) {
         onCloseMobile();
       }
     };
@@ -31,26 +33,55 @@ const Sidebar = ({
     }))
     .filter((group) => group.items.length > 0);
 
+  const handleItemClick = (itemId) => {
+    onSelectTab(itemId);
+    if (isMobile) onCloseMobile();
+  };
+
   return (
     <>
       {isMobile && isOpen && (
-        <div className="sidebar-overlay" onClick={onCloseMobile}></div>
+        <div
+          className="sidebar-overlay"
+          onClick={onCloseMobile}
+          aria-hidden="true"
+        />
       )}
 
-      <aside ref={sidebarRef} className={`sidebar ${isOpen ? 'open' : 'closed'}`}>
+      <aside
+        ref={sidebarRef}
+        className={`sidebar ${isOpen ? 'open' : 'closed'} ${
+          isMobile ? 'is-mobile' : 'is-desktop'
+        }`}
+        aria-hidden={isMobile && !isOpen}
+      >
         <div className="sidebar-header">
-          <div className="sidebar-logo" style={{ cursor: 'pointer' }}>
-            <div className="logo-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
-              </svg>
-            </div>
-            <span>Inventory</span>
-          </div>
-          <button className="sidebar-toggle" onClick={onToggle} aria-label="Toggle sidebar">
-            {isOpen ? '◀' : '▶'}
-          </button>
+          <img
+            src="/ims-logo.png"
+            alt="Inventory Monitoring System"
+            className="sidebar-header-logo"
+            draggable="false"
+          />
+          <span className="sidebar-header-wordmark">IMS</span>
+          {isMobile ? (
+            <button
+              type="button"
+              className="sidebar-header-toggle sidebar-close-btn"
+              onClick={onCloseMobile}
+              aria-label="Close menu"
+            >
+              ✕
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="sidebar-header-toggle"
+              onClick={onToggle}
+              aria-label="Toggle sidebar"
+            >
+              {isOpen ? '◀' : '▶'}
+            </button>
+          )}
         </div>
 
         <nav className="sidebar-nav">
@@ -59,19 +90,22 @@ const Sidebar = ({
               <span className="nav-group-title">{group.title}</span>
               <ul>
                 {group.items.map((item) => {
-                  const hasBadge =
-                    typeof item.badge === 'number' && item.badge > 0;
+                  const hasBadge = typeof item.badge === 'number' && item.badge > 0;
+                  const badgeClass =
+                    'nav-badge' +
+                    (item.badgeTone === 'amber' ? ' nav-badge--amber' : '');
                   return (
                     <li key={item.id} className={activeTab === item.id ? 'active' : ''}>
                       <button
-                        onClick={() => onSelectTab(item.id)}
+                        type="button"
+                        onClick={() => handleItemClick(item.id)}
                         aria-label={item.label}
                       >
                         <span className="nav-icon">{item.icon}</span>
                         <span className="nav-label">{item.label}</span>
                         {hasBadge && (
                           <span
-                            className="nav-badge"
+                            className={badgeClass}
                             aria-label={`${item.badge} pending`}
                           >
                             {item.badge > 99 ? '99+' : item.badge}
@@ -85,6 +119,15 @@ const Sidebar = ({
             </div>
           ))}
         </nav>
+
+        <div className="sidebar-footer">
+          <img
+            src="/lepantologo.svg"
+            alt="Lepanto"
+            className="sidebar-footer-logo"
+            draggable="false"
+          />
+        </div>
       </aside>
     </>
   );

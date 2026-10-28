@@ -1,1566 +1,2603 @@
 // src/components/departmenthead/TabStockTransferApproval.jsx
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { stockTransferApi, itemMasterApi, importPoApi } from '../../services/api';
+import React, {
+  useCallback, useEffect, useMemo, useRef, useState,
+} from 'react';
+import {
+  FiXCircle,
+  FiX,
+  FiAlertTriangle,
+  FiCheckCircle,
+  FiFileText,
+  FiPackage,
+  FiTarget,
+  FiDownload,
+  FiClock,
+  FiList,
+  FiInfo,
+  FiEdit3,
+  FiRotateCcw,
+} from 'react-icons/fi';
+import { useToast } from '../shared/ToastProvider';
+import ModalBanner from '../shared/ModalBanner';
+import ConfirmModal from '../shared/ConfirmModal';
 import ItemImageThumb from '../shared/ItemImageThumb';
+import { stockTransferApi, itemMasterApi, warehouseApi } from '../../services/api';
+import { usePaginatedList } from '../../hooks/usePaginatedList';
+import { useSessionState } from '../../hooks/useSessionState';
+
+import {
+  formatDate,
+  formatDateTime,
+  whPrimary,
+  whSecondary,
+  StatusBadge,
+  SkeletonTable,
+  SkeletonCards,
+  exportSTSCsv,
+  buildStockTransferModalCss,
+  buildStockTransferTabCss,
+  MODAL_THEME_INDIGO,
+  TAB_THEME_APPROVAL,
+} from '../shared/stockTransfer';
+
+// ============================================================
+// Shared CSS — built once at module load from the shared
+// builders using the Dept Head (indigo) theme preset.
+// ============================================================
+const modalCss = buildStockTransferModalCss(MODAL_THEME_INDIGO);
+const tabCss   = buildStockTransferTabCss(TAB_THEME_APPROVAL);
+
+// Session 13 (I4) — display "STS No. ?" for slips that haven't
+// been approved yet (no STS No. assigned).
+const STS_NO_PLACEHOLDER = 'STS No. ?';
+
+// ============================================================
+// Sub-sidebar flag CSS — unchanged from Session 8.
+// ============================================================
+const subSidebarFlagCss = `
+/* ---------- Card level ---------- */
+.tsa-subsidebar.tsa-subsidebar--flag {
+  position: relative;
+  background: linear-gradient(180deg, #ffffff 0%, #f6fefd 100%);
+  border: 1px solid #b8f1ea;
+  border-radius: 14px;
+  padding: 18px 14px 16px 22px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 14px 32px -16px rgba(0, 184, 176, 0.35);
+  overflow: hidden;
+}
+.tsa-subsidebar.tsa-subsidebar--flag::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 16px;
+  bottom: 16px;
+  width: 4px;
+  background: linear-gradient(180deg, #00e0d4 0%, #008a82 100%);
+  border-radius: 0 4px 4px 0;
+  box-shadow: 0 0 14px rgba(0, 184, 176, 0.45);
+  pointer-events: none;
+}
+.tsa-subsidebar-flag-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #ccfbf1;
+  margin-bottom: 12px;
+}
+.tsa-subsidebar-flag-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #0f766e;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  margin: 0;
+}
+.tsa-subsidebar-flag-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #00b8b0;
+  flex-shrink: 0;
+  animation: tsa-subsidebar-pulse 2.4s ease-in-out infinite;
+}
+@keyframes tsa-subsidebar-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(0, 184, 176, 0.22); }
+  50%      { box-shadow: 0 0 0 8px rgba(0, 184, 176, 0.05); }
+}
+.tsa-subsidebar-flag-subtitle {
+  margin: 0;
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.4;
+  font-weight: 500;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-subsidebar-group {
+  padding: 0;
+  border-bottom: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-subsidebar-group > .tsa-subsidebar-label {
+  display: none;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px 10px 16px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  text-align: left;
+  transition: background 0.15s ease, color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item:hover {
+  background: rgba(0, 184, 176, 0.07);
+  color: #0f172a;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item:focus-visible {
+  outline: 2px solid #00b8b0;
+  outline-offset: 2px;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item.active {
+  background: rgba(0, 184, 176, 0.12);
+  color: #0f766e;
+}
+.tsa-filter-item-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.tsa-filter-item-label svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.2;
+  flex-shrink: 0;
+  color: #64748b;
+  transition: color 0.15s ease;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item:hover .tsa-filter-item-label svg {
+  color: #0f766e;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item.active .tsa-filter-item-label svg {
+  color: #0f766e;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 0;
+  border-radius: 2px;
+  background: #cbd5e1;
+  transition:
+    height 0.22s cubic-bezier(0.34, 1.4, 0.64, 1),
+    background 0.15s ease;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item:hover::before {
+  height: 55%;
+  background: #00b8b0;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item.active::before {
+  height: 68%;
+  background: #0f766e;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-count {
+  font-family: 'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  background: #f1f5f9;
+  padding: 1px 7px;
+  border-radius: 999px;
+  min-width: 22px;
+  text-align: center;
+  line-height: 1.4;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item:hover .tsa-filter-count {
+  background: #d7ecf3;
+  color: #334155;
+}
+.tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item.active .tsa-filter-count {
+  background: #0f766e;
+  color: #ffffff;
+}
+
+@media (max-width: 900px) {
+  .tsa-subsidebar.tsa-subsidebar--flag {
+    padding: 12px 14px 12px 20px;
+  }
+  .tsa-subsidebar.tsa-subsidebar--flag::before {
+    top: 10px;
+    bottom: 10px;
+  }
+  .tsa-subsidebar-flag-head {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+  }
+  .tsa-subsidebar-flag-subtitle {
+    text-align: right;
+    font-size: 10.5px;
+    color: #94a3b8;
+  }
+  .tsa-subsidebar.tsa-subsidebar--flag .tsa-subsidebar-group {
+    flex-direction: row;
+    gap: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    scrollbar-width: thin;
+    margin: 0 -4px;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+  .tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item {
+    flex: 0 0 auto;
+    min-width: 170px;
+    padding: 9px 12px;
+    border: 1px solid #b8f1ea;
+    border-radius: 10px;
+    background: #ffffff;
+  }
+  .tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item:hover {
+    background: #f0fdfa;
+    border-color: #5eead4;
+  }
+  .tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item.active {
+    background: #f0fdfa;
+    border-color: #0f766e;
+  }
+  .tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item::before {
+    display: none;
+  }
+}
+@media (max-width: 480px) {
+  .tsa-subsidebar-flag-subtitle { display: none; }
+  .tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item {
+    min-width: 150px;
+    font-size: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tsa-subsidebar-flag-dot { animation: none !important; box-shadow: 0 0 0 3px rgba(0, 184, 176, 0.22); }
+  .tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item,
+  .tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-item::before,
+  .tsa-subsidebar.tsa-subsidebar--flag .tsa-filter-count,
+  .tsa-filter-item-label svg {
+    transition: none !important;
+  }
+}
+`;
+
+// ============================================================
+// Icon CSS — unchanged from Session 8.
+// ============================================================
+const tsaIconCss = `
+.tsm-header-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tsm-header-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2.2;
+  color: #ffffff;
+}
+.tsm-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tsm-close svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.4;
+}
+.tsm-rejection-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tsm-rejection-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.4;
+  color: #dc2626;
+}
+.tsm-note-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.tsm-note-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.4;
+  color: #0f766e;
+}
+.tsm-note-block .tsm-note-icon svg {
+  color: #b45309;
+}
+.tsm-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.tsm-section-title svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.2;
+  color: #334155;
+}
+.tsa-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  margin-right: 6px;
+  vertical-align: -0.12em;
+  line-height: 1;
+}
+.tsa-btn-icon svg {
+  width: 100%;
+  height: 100%;
+  stroke-width: 2.4;
+}
+.tsa-section-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.tsa-section-heading svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 2.2;
+  color: #1a1f26;
+}
+.tsa-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.tsa-info-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.2;
+  color: #1e3a8a;
+}
+.no-items-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.no-items-clear svg {
+  width: 1em;
+  height: 1em;
+  stroke-width: 2.4;
+}
+.export-btn .tsa-btn-icon { margin-right: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tsa-btn-icon, .tsa-info-icon,
+  .tsm-section-title svg, .tsm-note-icon svg, .tsm-rejection-icon svg {
+    transition: none !important;
+  }
+}
+`;
+
+// ============================================================
+// Session 9 (F2) — CSS for inline quantity adjustment.
+// Every selector is prefixed with `tsa-` so nothing leaks into
+// the shared modal / tab CSS.
+// ============================================================
+const tsaQtyCss = `
+/* ---------- Edit banner (top of lines list, pending only) ---------- */
+.tsa-edit-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  color: #1e1b4b;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.tsa-edit-banner-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #4338ca;
+  stroke-width: 2.4;
+}
+.tsa-edit-banner-body { min-width: 0; }
+.tsa-edit-banner-title {
+  font-size: 11px;
+  font-weight: 800;
+  color: #4338ca;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 3px;
+}
+
+/* ---------- Line metrics grid: 3-column editable ---------- */
+.tsm-line-metrics.tsm-line-metrics--edit {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.tsa-metric--edit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Numeric input */
+.tsa-qty-input {
+  width: 100%;
+  padding: 8px 10px;
+  min-height: 38px;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 8px;
+  text-align: center;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.tsa-qty-input:hover:not(:disabled) { border-color: #94a3b8; }
+.tsa-qty-input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+.tsa-qty-input:disabled { background: #f8fafc; color: #94a3b8; cursor: not-allowed; }
+.tsa-qty-input.is-changed { border-color: #6366f1; background: #eef2ff; color: #3730a3; }
+.tsa-qty-input.is-dropped { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
+.tsa-qty-input.is-raised  { border-color: #86efac; background: #f0fdf4; color: #166534; }
+
+/* Delta display */
+.tsa-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 800;
+  font-family: 'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.tsa-delta.is-zero    { color: #64748b; }
+.tsa-delta.is-partial { color: #b45309; }
+.tsa-delta.is-dropped { color: #dc2626; }
+.tsa-delta.is-raised  { color: #047857; }
+
+/* Line tags (Dropped / Reduced / Raised) */
+.tsa-line-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.tsa-line-tag--changed { background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; }
+.tsa-line-tag--dropped { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+.tsa-line-tag--raised  { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+
+/* Reason field */
+.tsa-reason-block {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  animation: tsaReasonIn 0.16s ease;
+}
+@keyframes tsaReasonIn {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.tsa-reason-label {
+  font-size: 11px;
+  font-weight: 800;
+  color: #334155;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tsa-reason-required { color: #dc2626; font-weight: 800; }
+.tsa-reason-input {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+  resize: vertical;
+  min-height: 52px;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.tsa-reason-input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+.tsa-reason-input:disabled { background: #f8fafc; color: #94a3b8; cursor: not-allowed; }
+.tsa-reason-error {
+  font-size: 11px;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+/* All-zero warning */
+.tsa-all-zero-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 1px solid #fcd34d;
+  border-left: 4px solid #dc2626;
+  border-radius: 10px;
+  color: #78350f;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.tsa-all-zero-warning-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #b91c1c;
+  stroke-width: 2.4;
+}
+
+/* Footer adjustment summary */
+.tsa-adj-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-right: auto;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #f0fdfa 0%, #ecfeff 100%);
+  border: 1px solid #99f6e4;
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: #0f766e;
+  min-width: 0;
+}
+.tsa-adj-summary-stats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.tsa-adj-summary-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tsa-adj-summary-stat strong {
+  font-family: 'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace;
+  font-weight: 800;
+  color: #0f172a;
+}
+.tsa-adj-summary-total {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f766e;
+  white-space: nowrap;
+}
+.tsa-adj-summary-arrow { color: #0f766e; opacity: 0.6; }
+.tsa-adj-summary-total-new { color: #047857; }
+
+/* Reset adjustments button */
+.tsa-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.tsa-reset-btn:hover:not(:disabled) { background: #f8fafc; border-color: #94a3b8; }
+.tsa-reset-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Responsive */
+@media (max-width: 900px) {
+  .tsm-line-metrics.tsm-line-metrics--edit { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 640px) {
+  .tsm-line-metrics.tsm-line-metrics--edit { grid-template-columns: 1fr 1fr; }
+  .tsa-qty-input { font-size: 16px; min-height: 44px; }
+  .tsa-reason-input { font-size: 16px; }
+  .tsa-adj-summary {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    margin-right: 0;
+  }
+  .tsa-adj-summary-stats { justify-content: space-between; }
+  .tsa-adj-summary-total { justify-content: space-between; }
+}
+@media (max-width: 480px) {
+  .tsm-line-metrics.tsm-line-metrics--edit { grid-template-columns: 1fr; }
+  .tsa-line-tag { font-size: 9px; padding: 2px 6px; }
+  .tsa-delta { font-size: 13px; }
+  .tsa-adj-summary { font-size: 12px; }
+}
+@media (max-width: 380px) {
+  .tsa-edit-banner { font-size: 12px; padding: 10px 12px; }
+  .tsa-adj-summary { padding: 9px 12px; gap: 8px; }
+  .tsa-adj-summary-stats { flex-direction: column; align-items: flex-start; gap: 5px; }
+  .tsa-adj-summary-total { flex-direction: column; align-items: flex-start; gap: 2px; }
+}
+@media (min-width: 1921px) {
+  .tsa-qty-input { font-size: 16px; padding: 10px 12px; min-height: 44px; }
+  .tsa-reason-input { font-size: 14px; }
+  .tsa-adj-summary { font-size: 14px; padding: 12px 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tsa-reason-block { animation: none !important; }
+  .tsa-qty-input,
+  .tsa-reason-input,
+  .tsa-reset-btn { transition: none !important; }
+}
+`;
+
+// ============================================================
+// Cross-component notification
+// ============================================================
+const notifyStsChanged = () => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('sts:changed'));
+  }
+};
 
 // ============================================================
 // Constants
 // ============================================================
-const STS_STATUS_FILTERS = [
-  { value: 'Pending',   label: 'Pending' },
-  { value: 'Approved',  label: 'Approved' },
-  { value: 'Rejected',  label: 'Rejected' },
-  { value: 'Completed', label: 'Completed' },
-  { value: 'Cancelled', label: 'Cancelled' },
-  { value: 'All',       label: 'All statuses' },
+const SEGMENT_PENDING = 'pending';
+const SEGMENT_HISTORY = 'history';
+
+const HISTORY_STATUS_FILTERS = [
+  'All',
+  'For Shipping',
+  'In-Transit',
+  'Received',
+  'Completed',
+  'Rejected',
+  'Cancelled',
 ];
 
-const statusBadgeStyle = (status) => {
-  switch (status) {
-    case 'Pending':
-      return { background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' };
-    case 'Approved':
-      return { background: '#dbeafe', color: '#1e40af', border: '1px solid #93c5fd' };
-    case 'Rejected':
-      return { background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' };
-    case 'Completed':
-      return { background: '#dcfce7', color: '#065f46', border: '1px solid #86efac' };
-    case 'Cancelled':
-      return { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' };
-    default:
-      return { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' };
-  }
+const PAGE_SIZE = 50;
+const SEARCH_DEBOUNCE_MS = 300;
+
+const STORAGE_KEYS = Object.freeze({
+  segment: 'sts:deptHead:segment',
+  pending: 'sts:deptHead:pending',
+  history: 'sts:deptHead:history',
+});
+
+const PENDING_INITIAL_FILTERS = Object.freeze({});
+
+const HISTORY_INITIAL_FILTERS = Object.freeze({
+  status:        'All',
+  startDate:     '',
+  endDate:       '',
+  warehouse:     '',
+  warehouseSide: 'either',
+});
+
+// ============================================================
+// Pure helpers (F2)
+// ============================================================
+
+/* Baseline for a line = requested_qty when present, else legacy qty. */
+const baselineOfLine = (line) => {
+  const rq = Number(line?.requested_qty);
+  if (Number.isFinite(rq) && rq >= 0) return rq;
+  const q = Number(line?.qty);
+  return Number.isFinite(q) && q >= 0 ? q : 0;
 };
 
-const formatDate = (v) => {
-  if (!v) return '—';
-  try {
-    const d = new Date(v);
-    if (isNaN(d.getTime())) return v;
-    return d.toLocaleDateString();
-  } catch {
-    return v;
+/* Build a fresh draft from a set of lines. */
+const buildInitialEdits = (lines) => {
+  const out = {};
+  if (!Array.isArray(lines)) return out;
+  for (const l of lines) {
+    const id = l?.sts_line_id;
+    if (id == null) continue;
+    out[id] = {
+      approved_qty: String(baselineOfLine(l)),
+      qty_change_reason: '',
+    };
   }
+  return out;
 };
 
-const formatDateTime = (v) => {
-  if (!v) return '—';
-  try {
-    return new Date(v).toLocaleString();
-  } catch {
-    return v;
-  }
+/* Classify the delta of one line for display. */
+const classifyDelta = (baseline, finalQty) => {
+  if (finalQty === baseline) return 'unchanged';
+  if (finalQty === 0)       return 'dropped';
+  if (finalQty < baseline)  return 'partial';
+  return 'raised';
 };
 
-// ------------------------------------------------------------
-// "What's next" hint based on the current STS status
-// ------------------------------------------------------------
+/* Parse a raw draft value into a real number, with baseline fallback. */
+const parseDraftQty = (raw, baseline) => {
+  if (raw === '' || raw == null) return baseline;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return baseline;
+  return n;
+};
+
+/* Compute the summary + validation state for a whole draft. */
+const summarizeDraft = (detail, edits) => {
+  const empty = {
+    total: 0, changed: 0, dropped: 0, reduced: 0, raised: 0,
+    totalRequested: 0, totalApproved: 0,
+    allZeroed: false, missingReasons: 0,
+    invalidQty: 0, changedLineIds: [],
+  };
+  if (!detail?.lines || detail.lines.length === 0) return empty;
+
+  let total = 0, changed = 0, dropped = 0, reduced = 0, raised = 0;
+  let totalRequested = 0, totalApproved = 0;
+  let missingReasons = 0, invalidQty = 0;
+  let anyPositive = false;
+  const changedLineIds = [];
+
+  for (const l of detail.lines) {
+    const baseline = baselineOfLine(l);
+    const edit = edits[l.sts_line_id] || {};
+    const raw = edit.approved_qty;
+
+    let finalQty = baseline;
+    if (raw !== '' && raw != null) {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) {
+        invalidQty += 1;
+        finalQty = baseline;
+      } else {
+        finalQty = n;
+      }
+    }
+
+    total += 1;
+    totalRequested += baseline;
+    totalApproved += finalQty;
+    if (finalQty > 0) anyPositive = true;
+
+    if (finalQty !== baseline) {
+      changed += 1;
+      changedLineIds.push(l.sts_line_id);
+      if (finalQty === 0) dropped += 1;
+      else if (finalQty < baseline) reduced += 1;
+      else raised += 1;
+
+      const reason = (edit.qty_change_reason || '').trim();
+      if (!reason) missingReasons += 1;
+    }
+  }
+
+  return {
+    total, changed, dropped, reduced, raised,
+    totalRequested, totalApproved,
+    allZeroed: total > 0 && !anyPositive,
+    missingReasons, invalidQty,
+    changedLineIds,
+  };
+};
+
+/* Build the approved_lines array for the backend. */
+const buildApprovedLinesPayload = (detail, edits) => {
+  if (!detail?.lines) return [];
+  return detail.lines.map((l) => {
+    const baseline = baselineOfLine(l);
+    const edit = edits[l.sts_line_id] || {};
+    const finalQty = parseDraftQty(edit.approved_qty, baseline);
+    const reason = (edit.qty_change_reason || '').trim();
+    return {
+      sts_line_id: l.sts_line_id,
+      approved_qty: finalQty,
+      qty_change_reason: finalQty !== baseline ? (reason || null) : null,
+    };
+  });
+};
+
+// ============================================================
+// nextStepForSTS helper
+// ============================================================
 const nextStepForSTS = (status) => {
   switch (status) {
-    case 'Pending':   return 'Your decision is required — review the slip and Approve or Reject it.';
-    case 'Approved':  return 'Approved. Waiting for the Handler to physically complete the transfer.';
-    case 'Rejected':  return 'Rejected. The Handler can edit and resubmit based on your remarks.';
-    case 'Completed': return 'Transfer is complete. No further action needed.';
-    case 'Cancelled': return 'This slip was cancelled by the submitter before approval.';
-    default:          return '—';
-  }
-};
-
-// ------------------------------------------------------------
-// Activity timeline presentation
-// ------------------------------------------------------------
-const activityIcon = (eventType) => {
-  switch (eventType) {
-    case 'Imported':           return '📥';
-    case 'Received':           return '📦';
-    case 'Forwarded':          return '➡️';
-    case 'TransferSubmitted':  return '🚚';
-    case 'TransferApproved':   return '✅';
-    case 'TransferRejected':   return '❌';
-    case 'TransferCancelled':  return '🚫';
-    case 'TransferCompleted':  return '🎉';
-    default:                   return '•';
-  }
-};
-
-const activityColor = (eventType) => {
-  switch (eventType) {
-    case 'Imported':           return '#0369a1';
-    case 'Received':           return '#0f766e';
-    case 'Forwarded':          return '#7c3aed';
-    case 'TransferSubmitted':  return '#4338ca';
-    case 'TransferApproved':   return '#15803d';
-    case 'TransferRejected':   return '#b91c1c';
-    case 'TransferCancelled':  return '#64748b';
-    case 'TransferCompleted':  return '#065f46';
-    default:                   return '#475569';
+    case 'Pending':      return 'Your decision is required — review the slip and Approve or Reject it.';
+    case 'For Shipping': return 'Approved. Waiting for the source warehouse to ship the stock.';
+    case 'In-Transit':   return 'In transit. Waiting for the destination warehouse to confirm arrival.';
+    case 'Received':     return 'Received. Good units have been stored in the pre-chosen locator.';
+    case 'Completed':    return 'Transfer complete. No further action needed.';
+    case 'Rejected':     return 'Rejected. The requester may submit a new request.';
+    case 'Cancelled':    return 'This slip was cancelled before approval.';
+    default:             return '—';
   }
 };
 
 // ============================================================
-// Component
+// RejectModal — unchanged.
 // ============================================================
-const TabStockTransferApproval = () => {
-  // ---- List state ----
-  const [slips, setSlips]                     = useState([]);
-  const [loading, setLoading]                 = useState(false);
-  const [statusFilter, setStatusFilter]       = useState('Pending');
-  const [searchTerm, setSearchTerm]           = useState('');
-  const [startDate, setStartDate]             = useState('');
-  const [endDate, setEndDate]                 = useState('');
-
-  // ---- Detail modal ----
-  const [detail, setDetail]                   = useState(null);
-  const [detailLoading, setDetailLoading]     = useState(false);
-  const [images, setImages]                   = useState({});
-  const [rejectMode, setRejectMode]           = useState(false);
-  const [rejectReason, setRejectReason]       = useState('');
-  const [acting, setActing]                   = useState(false);
-
-  // ---- PO activity (for the linked PO) ----
-  const [poActivity, setPoActivity]           = useState([]);
-  const [poActivityLoading, setPoActivityLoading] = useState(false);
-
-  // ============================================================
-  // Load list
-  // ============================================================
-  const loadSlips = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await stockTransferApi.listSTSs({
-        status: statusFilter === 'All' ? undefined : statusFilter,
-        search: searchTerm || undefined,
-        start_date: startDate || undefined,
-        end_date: endDate || undefined,
-        scope: 'all',
-      });
-
-      if (res.ok && Array.isArray(res.data)) {
-        setSlips(res.data);
-      } else {
-        console.error('Failed to load STS list:', res);
-        setSlips([]);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [statusFilter, searchTerm, startDate, endDate]);
+const RejectModal = ({
+  open, onClose, onConfirm, transfer, submitting,
+  feedback: parentFeedback, onDismissFeedback,
+}) => {
+  const [reason, setReason]     = useState('');
+  const [feedback, setFeedback] = useState(null);
 
   useEffect(() => {
-    loadSlips();
-  }, [loadSlips]);
+    if (open) { setReason(''); setFeedback(null); }
+  }, [open]);
 
-  // ============================================================
-  // Open detail (fetch STS + PO activity in parallel)
-  // ============================================================
-  const handleOpenDetail = async (slip) => {
-    setDetailLoading(true);
-    setRejectMode(false);
-    setRejectReason('');
-    setImages({});
-    setPoActivity([]);
-    setPoActivityLoading(false);
-    try {
-      const res = await stockTransferApi.getSTSDetail(slip.sts_id);
-      if (!res.ok || !res.data) {
-        alert('❌ Could not load the slip details.');
-        return;
-      }
+  if (!open || !transfer) return null;
 
-      const data = res.data;
+  const activeFeedback = feedback || parentFeedback;
 
-      // Debug: log the raw detail so you can confirm lines are in the payload
-      console.log('📋 STS Detail loaded:', {
-        sts_no: data.sts_no,
-        lineCount: Array.isArray(data.lines) ? data.lines.length : 'no lines key',
-        lines: data.lines,
+  const dismissFeedback = () => {
+    if (feedback) setFeedback(null);
+    if (parentFeedback) onDismissFeedback?.();
+  };
+
+  const confirm = () => {
+    setFeedback(null);
+    const trimmed = reason.trim();
+    if (!trimmed) {
+      setFeedback({
+        type: 'warning',
+        title: 'Reason required',
+        message: 'Please enter a reason for rejecting this transfer request.',
       });
+      return;
+    }
+    onConfirm?.(trimmed);
+  };
 
-      setDetail(data);
+  return (
+    <>
+      <style>{modalCss}</style>
+      <style>{tsaIconCss}</style>
+      <div className="tsm-overlay" onClick={submitting ? undefined : onClose}>
+        <div className="tsm-card tsm-card--sm" onClick={(e) => e.stopPropagation()}>
 
-      const codes = [...new Set((data.lines || []).map(l => l.item_code).filter(Boolean))];
-      if (codes.length > 0) {
-        try {
-          const imgRes = await itemMasterApi.getImagesByCodes(codes);
-          if (imgRes.ok && imgRes.data?.images) {
-            setImages(imgRes.data.images);
-          }
-        } catch (e) {
-          console.warn('Could not load images:', e);
-        }
+          <div className="tsm-header">
+            <div className="tsm-header-left">
+              <div className="tsm-header-icon" style={{ background: 'linear-gradient(135deg, #ef4444, #b91c1c)' }}>
+                <FiXCircle />
+              </div>
+              <div className="tsm-header-info">
+                <h3 className="tsm-header-title">Reject Transfer Request</h3>
+                <div className="tsm-header-sub">
+                  <span className="tsm-header-pono">
+                    {/* Session 13 (I4) — display "STS No. ?" until approved. */}
+                    {transfer.sts_no || STS_NO_PLACEHOLDER}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="tsm-close"
+              onClick={onClose}
+              disabled={submitting}
+              aria-label="Close"
+            ><FiX /></button>
+          </div>
+
+          <div className="tsm-body">
+            {activeFeedback && (
+              <ModalBanner
+                type={activeFeedback.type}
+                title={activeFeedback.title}
+                message={activeFeedback.message}
+                onClose={dismissFeedback}
+              />
+            )}
+
+            <div className="tsm-route-badge">
+              <div className="tsm-route-wh">
+                <div className="tsm-route-label">FROM</div>
+                <div className="tsm-route-name">
+                  {whPrimary(transfer.from_warehouse_name, transfer.from_warehouse_code)}
+                </div>
+                {whSecondary(transfer.from_warehouse_name, transfer.from_warehouse_code) && (
+                  <div className="tsm-route-code">{transfer.from_warehouse_code}</div>
+                )}
+              </div>
+              <div className="tsm-route-arrow" aria-hidden="true">→</div>
+              <div className="tsm-route-wh">
+                <div className="tsm-route-label">TO</div>
+                <div className="tsm-route-name">
+                  {whPrimary(transfer.to_warehouse_name, transfer.to_warehouse_code)}
+                </div>
+                {whSecondary(transfer.to_warehouse_name, transfer.to_warehouse_code) && (
+                  <div className="tsm-route-code">{transfer.to_warehouse_code}</div>
+                )}
+              </div>
+            </div>
+
+            <div className="tsm-field-block">
+              <label className="tsm-field-label" htmlFor="tsa-reject-reason">
+                Rejection Reason <span className="tsm-required">*</span>
+              </label>
+              <textarea
+                id="tsa-reject-reason"
+                className="tsm-textarea"
+                rows={4}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Explain why this request is being rejected…"
+                disabled={submitting}
+                autoFocus
+              />
+              <small className="tsm-helper-text">
+                This reason is shown to the requester. Rejection is terminal —
+                they will need to submit a new request.
+              </small>
+            </div>
+
+            <div className="tsm-note-block">
+              <span className="tsm-note-icon"><FiAlertTriangle /></span>
+              <span>
+                Rejecting is terminal. No inventory was reserved for this
+                pending slip, so nothing needs to be released back to the
+                source warehouse.
+              </span>
+            </div>
+          </div>
+
+          <div className="tsm-footer">
+            <button
+              type="button"
+              className="cancel-btn"
+              onClick={onClose}
+              disabled={submitting}
+            >
+              <span className="tsa-btn-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="19" y1="12" x2="5" y2="12" />
+                  <polyline points="12 19 5 12 12 5" />
+                </svg>
+              </span>
+              Back
+            </button>
+            <button
+              type="button"
+              className="save-btn"
+              onClick={confirm}
+              disabled={submitting || !reason.trim()}
+              style={{
+                background: submitting ? undefined : 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
+              }}
+            >
+              {submitting ? 'Rejecting…' : (
+                <>
+                  <span className="tsa-btn-icon"><FiXCircle /></span>
+                  Confirm Reject
+                </>
+              )}
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ============================================================
+// DetailModal
+// ------------------------------------------------------------
+// Presentational. The parent owns the draft (`edits`) and
+// passes down:  edits, onQtyChange, onReasonChange,
+// onResetEdits, summary.
+// ============================================================
+const DetailModal = ({
+  detail, images, onClose, onApprove, onReject,
+  acting, feedback, onDismissFeedback,
+  edits, onQtyChange, onReasonChange, onResetEdits,
+  summary,
+}) => {
+  if (!detail) return null;
+
+  const lines = detail.lines || [];
+  const isPending = detail.status === 'Pending';
+
+  return (
+    <>
+      <style>{modalCss}</style>
+      <style>{tsaIconCss}</style>
+      <style>{tsaQtyCss}</style>
+      <div className="tsm-overlay" onClick={acting ? undefined : onClose}>
+        <div className="tsm-card" onClick={(e) => e.stopPropagation()}>
+
+          <div className="tsm-header">
+            <div className="tsm-header-left">
+              <div className="tsm-header-icon" style={{ background: 'linear-gradient(135deg, #00d2c8, #008a82)' }}>
+                <FiFileText />
+              </div>
+              <div className="tsm-header-info">
+                <h3 className="tsm-header-title">
+                  {/* Session 13 (I4) — display "STS No. ?" until approved. */}
+                  {detail.sts_no || STS_NO_PLACEHOLDER}
+                </h3>
+                <div className="tsm-header-sub">
+                  <StatusBadge status={detail.status} />
+                  {detail.request_origin && (
+                    <>
+                      <span className="tsm-header-dot">·</span>
+                      <span>{detail.request_origin}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="tsm-close"
+              onClick={onClose}
+              disabled={acting}
+              aria-label="Close"
+            ><FiX /></button>
+          </div>
+
+          <div className="tsm-body">
+            {feedback && (
+              <ModalBanner
+                type={feedback.type}
+                title={feedback.title}
+                message={feedback.message}
+                onClose={onDismissFeedback}
+              />
+            )}
+
+            <div className="tsm-route-badge">
+              <div className="tsm-route-wh">
+                <div className="tsm-route-label">FROM</div>
+                <div className="tsm-route-name">
+                  {whPrimary(detail.from_warehouse_name, detail.from_warehouse_code)}
+                </div>
+                {whSecondary(detail.from_warehouse_name, detail.from_warehouse_code) && (
+                  <div className="tsm-route-code">{detail.from_warehouse_code}</div>
+                )}
+              </div>
+              <div className="tsm-route-arrow" aria-hidden="true">→</div>
+              <div className="tsm-route-wh">
+                <div className="tsm-route-label">TO</div>
+                <div className="tsm-route-name">
+                  {whPrimary(detail.to_warehouse_name, detail.to_warehouse_code)}
+                </div>
+                {whSecondary(detail.to_warehouse_name, detail.to_warehouse_code) && (
+                  <div className="tsm-route-code">{detail.to_warehouse_code}</div>
+                )}
+              </div>
+            </div>
+
+            <div className="tsm-meta-grid">
+              <div className="tsm-meta-box">
+                <div className="tsm-meta-label">Submitted By</div>
+                <div className="tsm-meta-value">{detail.submitted_by || '—'}</div>
+              </div>
+              <div className="tsm-meta-box">
+                <div className="tsm-meta-label">Submitted At</div>
+                <div className="tsm-meta-value">{formatDateTime(detail.submitted_at)}</div>
+              </div>
+              <div className="tsm-meta-box">
+                <div className="tsm-meta-label">Approved By</div>
+                <div className="tsm-meta-value">{detail.approved_by || '—'}</div>
+              </div>
+              <div className="tsm-meta-box">
+                <div className="tsm-meta-label">Approved At</div>
+                <div className="tsm-meta-value">
+                  {detail.approved_at ? formatDateTime(detail.approved_at) : '—'}
+                </div>
+              </div>
+            </div>
+
+            {detail.status === 'Rejected' && detail.rejection_reason && (
+              <div className="tsm-rejection-banner">
+                <div className="tsm-rejection-header">
+                  <span className="tsm-rejection-icon"><FiAlertTriangle /></span>
+                  <span className="tsm-rejection-title">
+                    Rejected by {detail.rejected_by || '—'}
+                  </span>
+                </div>
+                <div className="tsm-rejection-body">{detail.rejection_reason}</div>
+                <div className="tsm-rejection-meta">
+                  {formatDateTime(detail.rejected_at)}
+                </div>
+              </div>
+            )}
+
+            {detail.remarks && (
+              <div className="tsm-field-block">
+                <label className="tsm-field-label">Remarks from submitter</label>
+                <div className="tsm-remarks-box">{detail.remarks}</div>
+              </div>
+            )}
+
+            {isPending && (
+              <div className="tsa-edit-banner">
+                <FiEdit3 className="tsa-edit-banner-icon" />
+                <div className="tsa-edit-banner-body">
+                  <div className="tsa-edit-banner-title">Adjust quantities (optional)</div>
+                  <div>
+                    Change the approved qty per line if you are issuing less or
+                    more than requested. Set a line to <strong>0</strong> to drop
+                    it. A reason is required for every changed line. If every
+                    line is set to 0, the slip auto-rejects on submit.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {isPending && summary.allZeroed && (
+              <div className="tsa-all-zero-warning">
+                <FiAlertTriangle className="tsa-all-zero-warning-icon" />
+                <span>
+                  <strong>All lines are set to 0.</strong> Submitting will{' '}
+                  <strong>auto-reject</strong> this slip with the reason
+                  &ldquo;All lines were adjusted to zero by the approver.&rdquo;
+                </span>
+              </div>
+            )}
+
+            <div className="tsm-section-head">
+              <span className="tsm-section-title">
+                <FiPackage />
+                <span>Items <span className="tsm-section-count">({lines.length})</span></span>
+              </span>
+              {isPending && summary.changed > 0 && (
+                <span
+                  className="tsm-summary-chip"
+                  style={{ background: '#eef2ff', color: '#4338ca' }}
+                >
+                  {summary.changed} adjustment{summary.changed === 1 ? '' : 's'}
+                </span>
+              )}
+            </div>
+
+            <div className="tsm-lines-list">
+              {lines.map((l) => {
+                const baseline = baselineOfLine(l);
+                const edit = edits[l.sts_line_id] || {};
+                const rawQty = edit.approved_qty != null ? edit.approved_qty : String(baseline);
+                const parsed = parseDraftQty(rawQty, baseline);
+                const delta = parsed - baseline;
+                const kind = classifyDelta(baseline, parsed);
+                const rawIsBad = rawQty !== '' && rawQty != null
+                  && (!Number.isFinite(Number(rawQty)) || Number(rawQty) < 0);
+                const reasonMissing = isPending
+                  && kind !== 'unchanged'
+                  && !((edit.qty_change_reason || '').trim());
+
+                const storedApproved = l.approved_qty != null ? Number(l.approved_qty) : null;
+
+                const inputClass = rawIsBad
+                  ? 'tsa-qty-input is-dropped'
+                  : kind === 'dropped' ? 'tsa-qty-input is-dropped'
+                  : kind === 'partial' ? 'tsa-qty-input is-changed'
+                  : kind === 'raised'  ? 'tsa-qty-input is-raised'
+                  : 'tsa-qty-input';
+
+                const deltaLabel =
+                  delta === 0 ? 'No change'
+                  : delta > 0 ? `+${delta}`
+                  : `${delta}`;
+
+                const deltaClass =
+                  delta === 0 ? 'is-zero'
+                  : kind === 'dropped' ? 'is-dropped'
+                  : kind === 'partial' ? 'is-partial'
+                  : 'is-raised';
+
+                return (
+                  <div key={l.sts_line_id} className="tsm-line-card">
+                    <div className="tsm-line-top">
+                      <ItemImageThumb
+                        src={images[l.item_code]}
+                        alt={l.item_code}
+                        size={48}
+                      />
+                      <div className="tsm-line-info">
+                        <div className="tsm-line-code-row">
+                          <span className="tsm-line-code">{l.item_code}</span>
+                          {isPending && kind === 'dropped' && (
+                            <span className="tsa-line-tag tsa-line-tag--dropped">Dropped</span>
+                          )}
+                          {isPending && kind === 'partial' && (
+                            <span className="tsa-line-tag tsa-line-tag--changed">Reduced</span>
+                          )}
+                          {isPending && kind === 'raised' && (
+                            <span className="tsa-line-tag tsa-line-tag--raised">Raised</span>
+                          )}
+                        </div>
+                        <div className="tsm-line-name" title={l.item_name}>
+                          {l.item_name || '—'}
+                        </div>
+                      </div>
+                      <div className="tsm-line-uom-wrap">
+                        <span className="tpm-uom-tag">{l.uom || '—'}</span>
+                      </div>
+                    </div>
+
+                    {isPending ? (
+                      <div className="tsm-line-metrics tsm-line-metrics--edit">
+                        <div className="tsm-metric">
+                          <div className="tsm-metric-label">Requested</div>
+                          <div className="tsm-metric-value">{baseline}</div>
+                        </div>
+                        <div className="tsm-metric tsa-metric--edit">
+                          <div className="tsm-metric-label">Approve</div>
+                          <input
+                            type="number"
+                            min={0}
+                            step={1}
+                            inputMode="numeric"
+                            className={inputClass}
+                            value={rawQty}
+                            onChange={(e) => onQtyChange(l.sts_line_id, e.target.value)}
+                            disabled={acting}
+                            aria-label={`Approved quantity for ${l.item_code}`}
+                          />
+                        </div>
+                        <div className="tsm-metric">
+                          <div className="tsm-metric-label">Change</div>
+                          <div className={`tsa-delta ${deltaClass}`}>{deltaLabel}</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="tsm-line-metrics">
+                        <div className="tsm-metric">
+                          <div className="tsm-metric-label">Requested</div>
+                          <div className="tsm-metric-value">{baseline}</div>
+                        </div>
+                        <div className="tsm-metric">
+                          <div className="tsm-metric-label">Approved</div>
+                          <div className="tsm-metric-value">
+                            {storedApproved != null ? storedApproved : '—'}
+                          </div>
+                        </div>
+                        <div className="tsm-metric">
+                          <div className="tsm-metric-label">Received</div>
+                          <div className="tsm-metric-value">
+                            {Number(l.received_qty) || 0}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {isPending && kind !== 'unchanged' && (
+                      <div className="tsa-reason-block">
+                        <label className="tsa-reason-label">
+                          Reason for change
+                          <span className="tsa-reason-required">*</span>
+                        </label>
+                        <textarea
+                          className="tsa-reason-input"
+                          rows={2}
+                          value={edit.qty_change_reason || ''}
+                          onChange={(e) => onReasonChange(l.sts_line_id, e.target.value)}
+                          placeholder={
+                            kind === 'dropped'
+                              ? 'Why is this line being dropped?'
+                              : kind === 'partial'
+                              ? 'Why is the qty being reduced?'
+                              : 'Why is the qty being raised?'
+                          }
+                          disabled={acting}
+                        />
+                        {reasonMissing && (
+                          <div className="tsa-reason-error">
+                            A reason is required for adjusted lines.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {!isPending && l.qty_change_reason && (
+                      <div className="tsm-field-block">
+                        <label className="tsm-field-label">Adjustment reason</label>
+                        <div className="tsm-remarks-box">{l.qty_change_reason}</div>
+                        {l.qty_changed_by && (
+                          <small className="tsm-helper-text">
+                            Changed by {l.qty_changed_by}
+                            {l.qty_changed_at
+                              ? ` · ${formatDateTime(l.qty_changed_at)}`
+                              : ''}
+                          </small>
+                        )}
+                      </div>
+                    )}
+
+                    {l.locator_code && (
+                      <div className="tsm-line-bottom">
+                        <span className="tsm-max-hint">
+                          Target locator: <strong>{l.locator_code}</strong>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="tsm-note-block">
+              <span className="tsm-note-icon"><FiTarget /></span>
+              <span>
+                <strong>What&apos;s next:</strong> {nextStepForSTS(detail.status)}
+              </span>
+            </div>
+          </div>
+
+          <div className="tsm-footer">
+            {isPending ? (
+              <>
+                {summary.changed > 0 && (
+                  <div className="tsa-adj-summary">
+                    <div className="tsa-adj-summary-stats">
+                      <span className="tsa-adj-summary-stat">
+                        <strong>{summary.changed}</strong> of{' '}
+                        <strong>{summary.total}</strong> line
+                        {summary.total === 1 ? '' : 's'} adjusted
+                      </span>
+                      {summary.dropped > 0 && (
+                        <span className="tsa-adj-summary-stat">
+                          <strong>{summary.dropped}</strong> dropped
+                        </span>
+                      )}
+                      {summary.reduced > 0 && (
+                        <span className="tsa-adj-summary-stat">
+                          <strong>{summary.reduced}</strong> reduced
+                        </span>
+                      )}
+                      {summary.raised > 0 && (
+                        <span className="tsa-adj-summary-stat">
+                          <strong>{summary.raised}</strong> raised
+                        </span>
+                      )}
+                    </div>
+                    <div className="tsa-adj-summary-total">
+                      <span>{summary.totalRequested}</span>
+                      <span className="tsa-adj-summary-arrow">→</span>
+                      <span className="tsa-adj-summary-total-new">
+                        {summary.totalApproved}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {summary.changed > 0 && (
+                  <button
+                    type="button"
+                    className="tsa-reset-btn"
+                    onClick={onResetEdits}
+                    disabled={acting}
+                    title="Reset every line back to its requested qty"
+                  >
+                    <FiRotateCcw size={13} />
+                    Reset
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  className="cancel-btn"
+                  onClick={onClose}
+                  disabled={acting}
+                >
+                  Close
+                </button>
+
+                <button
+                  type="button"
+                  className="save-btn"
+                  onClick={onReject}
+                  disabled={acting}
+                  style={{
+                    background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
+                  }}
+                >
+                  <span className="tsa-btn-icon"><FiXCircle /></span>
+                  Reject
+                </button>
+
+                <button
+                  type="button"
+                  className="save-btn"
+                  onClick={onApprove}
+                  disabled={acting || summary.missingReasons > 0 || summary.invalidQty > 0}
+                  style={{
+                    background:
+                      acting || summary.missingReasons > 0 || summary.invalidQty > 0
+                        ? undefined
+                        : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  }}
+                  title={
+                    summary.invalidQty > 0
+                      ? 'Fix invalid quantities before approving'
+                      : summary.missingReasons > 0
+                      ? 'Add a reason for every changed line to continue'
+                      : 'Approve with the current per-line quantities'
+                  }
+                >
+                  <span className="tsa-btn-icon"><FiCheckCircle /></span>
+                  {summary.changed > 0 ? 'Approve with adjustments' : 'Approve'}
+                </button>
+              </>
+            ) : (
+              <button type="button" className="cancel-btn" onClick={onClose}>
+                Close
+              </button>
+            )}
+          </div>
+
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ============================================================
+// Main component
+// ============================================================
+const TabStockTransferApproval = () => {
+  const toast = useToast();
+
+  const [segment, setSegment] = useSessionState(
+    STORAGE_KEYS.segment,
+    SEGMENT_PENDING
+  );
+
+  const [warehouses, setWarehouses]         = useState([]);
+
+  const [detail, setDetail]                 = useState(null);
+  const [detailLoading, setDetailLoading]   = useState(false);
+  const [detailFeedback, setDetailFeedback] = useState(null);
+  const [images, setImages]                 = useState({});
+
+  const [showReject, setShowReject]         = useState(false);
+  const [rejectFeedback, setRejectFeedback] = useState(null);
+
+  const [showApproveConfirm, setShowApproveConfirm] = useState(false);
+
+  const [acting, setActing]                 = useState(false);
+
+  const [exporting, setExporting]           = useState(false);
+
+  // ---- F2: qty-adjust draft (owned by the parent so the whole
+  //          approve flow can read from a single source of truth). ----
+  const [edits, setEdits]                   = useState({});
+
+  const firstLineCacheRef = useRef(new Map());
+  const detailReqIdRef    = useRef(0);
+
+  // ============================================================
+  // Pending queue (paginated, server-filtered)
+  // ============================================================
+  const pendingLoader = useCallback(async ({ page, limit, search }) => {
+    return stockTransferApi.approvalQueue({
+      page,
+      limit,
+      search: search || undefined,
+    });
+  }, []);
+
+  const pending = usePaginatedList({
+    loader: pendingLoader,
+    initialFilters: PENDING_INITIAL_FILTERS,
+    pageSize: PAGE_SIZE,
+    debounceMs: SEARCH_DEBOUNCE_MS,
+    storageKey: STORAGE_KEYS.pending,
+  });
+
+  // ============================================================
+  // History (paginated, server-filtered)
+  // ============================================================
+  const historyLoader = useCallback(async ({
+    page, limit, search, status, startDate, endDate,
+    warehouse, warehouseSide,
+  }) => {
+    return stockTransferApi.listSTSs({
+      scope:      'all',
+      page,
+      limit,
+      search:     search || undefined,
+      status:     status === 'All' ? undefined : status,
+      start_date: startDate || undefined,
+      end_date:   endDate || undefined,
+      warehouse_code: warehouse || undefined,
+      warehouse_side: warehouse ? (warehouseSide || 'either') : undefined,
+    });
+  }, []);
+
+  const history = usePaginatedList({
+    loader: historyLoader,
+    initialFilters: HISTORY_INITIAL_FILTERS,
+    pageSize: PAGE_SIZE,
+    debounceMs: SEARCH_DEBOUNCE_MS,
+    storageKey: STORAGE_KEYS.history,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await warehouseApi.getAllWarehouses();
+        if (cancelled) return;
+        if (res.ok && Array.isArray(res.data)) setWarehouses(res.data);
+      } catch (err) {
+        console.warn('Could not load warehouses:', err);
       }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
-      // ---- Fetch the linked PO's activity history (if any) ----
-      if (data.po_no) {
-        setPoActivityLoading(true);
-        try {
-          const actRes = await importPoApi.getPOActivity(data.po_no);
-          if (actRes.ok && Array.isArray(actRes.data)) {
-            setPoActivity(actRes.data);
-          }
-        } catch (e) {
-          console.warn('Could not load PO activity:', e);
-        } finally {
-          setPoActivityLoading(false);
-        }
+  // ============================================================
+  // Load first-line info + item images for visible rows
+  // ============================================================
+  const loadImagesForRows = useCallback(async (rows) => {
+    if (!Array.isArray(rows) || rows.length === 0) return;
+
+    const codes = new Set();
+    const uncached = [];
+
+    for (const row of rows) {
+      if (firstLineCacheRef.current.has(row.sts_id)) {
+        const cached = firstLineCacheRef.current.get(row.sts_id);
+        if (cached?.item_code) codes.add(cached.item_code);
+      } else if (row.sts_id) {
+        uncached.push(row);
       }
+    }
+
+    if (uncached.length > 0) {
+      await Promise.all(
+        uncached.map(async (row) => {
+          try {
+            const res = await stockTransferApi.getSTSDetail(row.sts_id);
+            if (res.ok && res.data?.lines?.length) {
+              const first = res.data.lines[0];
+              firstLineCacheRef.current.set(row.sts_id, {
+                item_code:  first.item_code || null,
+                item_name:  first.item_name || null,
+                uom:        first.uom || null,
+                line_count: res.data.lines.length,
+              });
+              if (first.item_code) codes.add(first.item_code);
+            } else {
+              firstLineCacheRef.current.set(row.sts_id, null);
+            }
+          } catch {
+            firstLineCacheRef.current.set(row.sts_id, null);
+          }
+        })
+      );
+    }
+
+    if (codes.size === 0) return;
+
+    try {
+      const res = await itemMasterApi.getImagesByCodes([...codes]);
+      if (res.ok && res.data?.images) {
+        setImages((prev) => ({ ...prev, ...res.data.images }));
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    if (pending.rows.length > 0) loadImagesForRows(pending.rows);
+  }, [pending.rows, loadImagesForRows]);
+
+  useEffect(() => {
+    if (history.rows.length > 0) loadImagesForRows(history.rows);
+  }, [history.rows, loadImagesForRows]);
+
+  const getRowItem = useCallback((row) => {
+    const cached = firstLineCacheRef.current.get(row.sts_id);
+    if (!cached) return null;
+    return {
+      item_code:  cached.item_code,
+      item_name:  cached.item_name,
+      line_count: cached.line_count ?? row.line_count ?? 1,
+    };
+  }, []);
+
+  // ============================================================
+  // F2 — draft lifecycle
+  // ============================================================
+
+  /* Reset the draft whenever the modal opens a new slip. */
+  useEffect(() => {
+    if (!detail?.lines) { setEdits({}); return; }
+    setEdits(buildInitialEdits(detail.lines));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail?.sts_id]);
+
+  /* Derived summary from the draft + detail. */
+  const draftSummary = useMemo(
+    () => summarizeDraft(detail, edits),
+    [detail, edits]
+  );
+
+  const handleQtyChange = useCallback((lineId, raw) => {
+    setEdits((prev) => ({
+      ...prev,
+      [lineId]: {
+        ...(prev[lineId] || {}),
+        approved_qty: raw,
+      },
+    }));
+  }, []);
+
+  const handleReasonChange = useCallback((lineId, raw) => {
+    setEdits((prev) => ({
+      ...prev,
+      [lineId]: {
+        ...(prev[lineId] || {}),
+        qty_change_reason: raw,
+      },
+    }));
+  }, []);
+
+  const handleResetEdits = useCallback(() => {
+    if (!detail?.lines) return;
+    setEdits(buildInitialEdits(detail.lines));
+  }, [detail]);
+
+  // ============================================================
+  // Segment selection
+  // ============================================================
+  const isPendingSegment = segment === SEGMENT_PENDING;
+  const activeList       = isPendingSegment ? pending : history;
+  const rows             = activeList.rows;
+  const loading          = activeList.loading;
+
+  const pendingCount = pending.total;
+  const historyCount = history.total;
+
+  const pendingHasActiveFilter = !!pending.search.trim();
+  const historyHasActiveFilter =
+    !!history.search.trim() ||
+    history.filters.status !== 'All' ||
+    !!history.filters.startDate ||
+    !!history.filters.endDate ||
+    !!history.filters.warehouse;
+
+  const activeSegmentHasFilter = isPendingSegment
+    ? pendingHasActiveFilter
+    : historyHasActiveFilter;
+
+  // ============================================================
+  // Detail modal
+  // ============================================================
+  const openDetail = async (row) => {
+    const reqId = ++detailReqIdRef.current;
+    const isStale = () => reqId !== detailReqIdRef.current;
+
+    setDetailLoading(true);
+    setDetailFeedback(null);
+    setImages({});
+    try {
+      const res = await stockTransferApi.getSTSDetail(row.sts_id);
+      if (isStale()) return;
+      if (res.ok && res.data) {
+        setDetail(res.data);
+        const codes = [...new Set((res.data.lines || []).map((l) => l.item_code).filter(Boolean))];
+        if (codes.length) {
+          try {
+            const imgRes = await itemMasterApi.getImagesByCodes(codes);
+            if (isStale()) return;
+            if (imgRes.ok && imgRes.data?.images) {
+              setImages(imgRes.data.images);
+            }
+          } catch { /* ignore */ }
+        }
+      } else {
+        toast.error('Could not load the transfer details.');
+      }
+    } catch (err) {
+      if (isStale()) return;
+      console.error('Detail error:', err);
+      toast.error('Error connecting to server.');
     } finally {
-      setDetailLoading(false);
+      if (!isStale()) setDetailLoading(false);
     }
   };
 
   const closeDetail = () => {
     if (acting) return;
     setDetail(null);
-    setRejectMode(false);
-    setRejectReason('');
-    setImages({});
-    setPoActivity([]);
+    setDetailFeedback(null);
+    setShowReject(false);
+    setShowApproveConfirm(false);
+    setEdits({});
   };
 
   // ============================================================
-  // Actions
+  // Approve — F2
   // ============================================================
-  const handleApprove = async () => {
+  const handleApproveClick = () => {
     if (!detail) return;
-    if (!window.confirm(
-      `✅ Approve ${detail.sts_no}?\n\n` +
-      `From: ${detail.from_warehouse_code || '—'} — ${detail.from_warehouse_name || ''}\n` +
-      `To:   ${detail.to_warehouse_code || '—'} — ${detail.to_warehouse_name || ''}\n\n` +
-      `Proceed?`
-    )) return;
+    setDetailFeedback(null);
 
-    setActing(true);
-    try {
-      const res = await stockTransferApi.approveSTS(detail.sts_id);
-      if (!res.ok || !res.data?.success) {
-        alert('❌ ' + (res.data?.message || 'Failed to approve.'));
-        return;
-      }
-      alert('✅ Stock Transfer Slip approved.');
-      closeDetail();
-      await loadSlips();
-    } catch (err) {
-      console.error(err);
-      alert('❌ Error approving slip.');
-    } finally {
-      setActing(false);
-    }
-  };
-
-  const handleReject = async () => {
-    if (!detail) return;
-    const reason = rejectReason.trim();
-    if (!reason) {
-      alert('Please enter a rejection reason.');
+    /* Client-side gate before showing the confirm modal. */
+    if (draftSummary.invalidQty > 0) {
+      setDetailFeedback({
+        type: 'error',
+        title: 'Invalid quantity',
+        message: 'One or more lines have an invalid approved qty. Please fix them before approving.',
+      });
       return;
     }
-    if (!window.confirm(`❌ Reject ${detail.sts_no}?\n\nReason: ${reason}\n\nProceed?`)) return;
+    if (draftSummary.missingReasons > 0) {
+      setDetailFeedback({
+        type: 'warning',
+        title: 'Reason required',
+        message: 'Every line whose qty was changed needs a reason before you can approve.',
+      });
+      return;
+    }
+
+    setShowApproveConfirm(true);
+  };
+
+  const handleApproveCancel = () => {
+    if (acting) return;
+    setShowApproveConfirm(false);
+  };
+
+  const handleApproveConfirm = async () => {
+    if (!detail) return;
+
+    const approved_lines = buildApprovedLinesPayload(detail, edits);
 
     setActing(true);
+    setDetailFeedback(null);
     try {
-      const res = await stockTransferApi.rejectSTS(detail.sts_id, reason);
-      if (!res.ok || !res.data?.success) {
-        alert('❌ ' + (res.data?.message || 'Failed to reject.'));
+      const res = await stockTransferApi.approveSTS(detail.sts_id, { approved_lines });
+
+      if (!res.ok || res.data?.success === false) {
+        setShowApproveConfirm(false);
+        setDetailFeedback({
+          type: 'error',
+          title: 'Approval failed',
+          message: res.data?.message || 'Failed to approve this transfer request.',
+        });
         return;
       }
-      alert('✅ Stock Transfer Slip rejected.');
+
+      const allZeroed = res.data?.data?.all_zeroed === true;
+      if (allZeroed) {
+        toast.warning(
+          res.data?.message ||
+          'All lines were zeroed — the transfer was auto-rejected.'
+        );
+        setShowApproveConfirm(false);
+        closeDetail();
+        await pending.reload();
+        await history.reload();
+        notifyStsChanged();
+        return;
+      }
+
+      const issuedStsNo =
+        res.data?.data?.sts_no ||
+        res.data?.sts_no ||
+        null;
+
+      const adjustedCount = approved_lines.reduce((acc, p) => {
+        const line = detail.lines.find((x) => x.sts_line_id === p.sts_line_id);
+        if (!line) return acc;
+        const baseline = baselineOfLine(line);
+        return acc + (p.approved_qty !== baseline ? 1 : 0);
+      }, 0);
+
+      let msg;
+      if (issuedStsNo && adjustedCount > 0) {
+        msg = `Approved with ${adjustedCount} adjustment${adjustedCount === 1 ? '' : 's'}. STS No. ${issuedStsNo} issued.`;
+      } else if (issuedStsNo) {
+        msg = `Approved. STS No. ${issuedStsNo} issued — transfer is now For Shipping.`;
+      } else if (adjustedCount > 0) {
+        msg = `Approved with ${adjustedCount} adjustment${adjustedCount === 1 ? '' : 's'}. Transfer is now For Shipping.`;
+      } else {
+        msg = res.data?.message || 'Approved. Transfer is now For Shipping.';
+      }
+
+      toast.success(msg);
+
+      setShowApproveConfirm(false);
       closeDetail();
-      await loadSlips();
+      await pending.reload();
+      await history.reload();
+      notifyStsChanged();
     } catch (err) {
-      console.error(err);
-      alert('❌ Error rejecting slip.');
+      console.error('Approve error:', err);
+      setShowApproveConfirm(false);
+      setDetailFeedback({
+        type: 'error',
+        title: 'Approval failed',
+        message: 'Error connecting to server.',
+      });
     } finally {
       setActing(false);
     }
   };
 
-  const clearFilters = () => {
-    setStatusFilter('Pending');
-    setSearchTerm('');
-    setStartDate('');
-    setEndDate('');
+  // ============================================================
+  // Reject
+  // ============================================================
+  const openReject = () => {
+    if (!detail) return;
+    setRejectFeedback(null);
+    setShowReject(true);
   };
 
-  // ============================================================
-  // Derived
-  // ============================================================
-  const linesTotalQty = useMemo(() => {
-    if (!detail?.lines) return 0;
-    return detail.lines.reduce((sum, l) => sum + (Number(l.qty) || 0), 0);
-  }, [detail]);
+  const closeReject = () => {
+    if (acting) return;
+    setShowReject(false);
+    setRejectFeedback(null);
+  };
 
-  const lineCount = Array.isArray(detail?.lines) ? detail.lines.length : 0;
+  const handleRejectConfirm = async (reason) => {
+    if (!detail) return;
+    setActing(true);
+    setRejectFeedback(null);
+    try {
+      const res = await stockTransferApi.rejectSTS(detail.sts_id, reason);
+      if (!res.ok || res.data?.success === false) {
+        setRejectFeedback({
+          type: 'error',
+          title: 'Rejection failed',
+          message: res.data?.message || 'Failed to reject this transfer request.',
+        });
+        return;
+      }
 
-  // ============================================================
-  // Row actions
-  // ============================================================
-  const renderRowActions = (slip) => {
-    const isPending = slip.status === 'Pending';
-
-    if (isPending) {
-      return (
-        <button
-          className="action-btn edit"
-          onClick={(e) => { e.stopPropagation(); handleOpenDetail(slip); }}
-          disabled={detailLoading}
-          title="Review this slip"
-        >
-          {detailLoading ? '…' : 'Review'}
-        </button>
+      toast.success(
+        res.data?.message ||
+        'Transfer request rejected. The requester can submit a new one.'
       );
-    }
 
-    return (
-      <button
-        type="button"
-        className="po-view-hint"
-        onClick={(e) => { e.stopPropagation(); handleOpenDetail(slip); }}
-        title="View full details"
-      >
-        View ›
-      </button>
-    );
+      setShowReject(false);
+      setDetail(null);
+      setDetailFeedback(null);
+      setEdits({});
+
+      await pending.reload();
+      await history.reload();
+      notifyStsChanged();
+    } catch (err) {
+      console.error('Reject error:', err);
+      setRejectFeedback({
+        type: 'error',
+        title: 'Rejection failed',
+        message: 'Error connecting to server.',
+      });
+    } finally {
+      setActing(false);
+    }
   };
 
   // ============================================================
-  // Render
+  // Export
   // ============================================================
-  return (
-    <div className="items-section">
-      <style>{approvalCss}</style>
+  const handleExport = async () => {
+    if (exporting) return;
+    if (isPendingSegment) return;
 
-      <div className="section-header">
-        <h3>✅ Stock Transfer Slip Approval</h3>
-        <div className="header-actions">
-          <span className="item-count">
-            Showing: {slips.length} slip{slips.length === 1 ? '' : 's'}
-            {statusFilter !== 'All' && ` · ${statusFilter}`}
-          </span>
-        </div>
-      </div>
+    setExporting(true);
+    try {
+      const EXPORT_LIMIT = 500;
+      const exportRows = await history.fetchAll(EXPORT_LIMIT);
 
-      <div
-        style={{
-          background: '#eff6ff',
-          border: '1px solid #bfdbfe',
-          borderRadius: 8,
-          padding: '10px 14px',
-          marginBottom: 16,
-          fontSize: 13,
-          color: '#1e3a8a',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-        }}
-      >
-        <span style={{ fontSize: 18 }}>ℹ️</span>
-        <span>
-          Stock Transfer Slips submitted by Stock Handlers appear here.
-          Click any row to review the details, then Approve or Reject.
-        </span>
-      </div>
+      if (!exportRows || exportRows.length === 0) {
+        toast.info('Nothing to export — the current filters match no slips.');
+        return;
+      }
 
-      <div className="dashboard-search-section">
-        <div className="dashboard-filters">
-          <div className="filter-row">
-            <div className="filter-group search-group">
-              <label>Search</label>
-              <input
-                type="text"
-                placeholder="Search STS No. or PO No..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="filter-input"
-              />
-            </div>
-            <div className="filter-group">
-              <label>Start Date</label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="filter-input"
-              />
-            </div>
-            <div className="filter-group">
-              <label>End Date</label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="filter-input"
-              />
-            </div>
-            <div className="filter-group">
-              <label>Status</label>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="filter-input"
-              >
-                {STS_STATUS_FILTERS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="filter-group action-group">
-              <button
-                className="cancel-btn"
-                onClick={clearFilters}
-                style={{ padding: '8px 16px' }}
-              >
-                Clear Filters
-              </button>
-              <button
-                className="add-user-btn"
-                onClick={loadSlips}
-                style={{ padding: '8px 16px' }}
-              >
-                Refresh
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      const truncated = history.total > exportRows.length;
+      const filename = exportSTSCsv(exportRows, 'all-slips');
 
-      <div className="daily-items-section">
-        <div className="daily-items-header">
-          <h4>Stock Transfer Slips</h4>
-          <span className="daily-items-count">{slips.length} total</span>
-        </div>
+      if (truncated) {
+        toast.warning(
+          `Exported the first ${exportRows.length} of ${history.total} rows to ${filename}. ` +
+          `Narrow the filters to export the rest.`,
+          { duration: 7000 }
+        );
+      } else {
+        toast.success(
+          `Exported ${exportRows.length} row${exportRows.length === 1 ? '' : 's'} to ${filename}.`
+        );
+      }
+    } catch (err) {
+      console.error('Export error:', err);
+      toast.error('Export failed. Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
-        {/* Desktop table */}
-        <div className="table-wrapper po-desktop-only">
-          {loading ? (
-            <div className="loading-spinner" style={{ margin: '20px auto' }} />
-          ) : slips.length > 0 ? (
-            <table className="data-table po-compact-table">
-              <thead>
-                <tr>
-                  <th className="col-sts-no">STS No.</th>
-                  <th className="col-po-no">PO No.</th>
-                  <th className="col-date">Transfer Date</th>
-                  <th className="col-status">Status</th>
-                  <th className="col-actions">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {slips.map(s => (
-                  <tr
-                    key={s.sts_id}
-                    onClick={() => handleOpenDetail(s)}
-                    className="po-clickable-row"
-                    title="Click to view full details"
-                  >
-                    <td className="col-sts-no">
-                      <span className="po-no-big">{s.sts_no}</span>
-                    </td>
-                    <td className="col-po-no">{s.po_no || '—'}</td>
-                    <td className="col-date">{formatDate(s.transfer_date)}</td>
-                    <td className="col-status">
-                      <span
-                        style={{
-                          display: 'inline-block',
-                          padding: '4px 12px',
-                          borderRadius: 999,
-                          fontSize: 12,
-                          fontWeight: 700,
-                          letterSpacing: '0.03em',
-                          ...statusBadgeStyle(s.status),
-                        }}
+  // ============================================================
+  // Misc
+  // ============================================================
+  const clearFilters = () => {
+    if (isPendingSegment) pending.clearAll();
+    else history.clearAll();
+  };
+
+  const refreshCurrent = () => {
+    if (isPendingSegment) pending.reload();
+    else history.reload();
+  };
+
+  // ============================================================
+  // Desktop table
+  // ============================================================
+  const renderDesktopTable = () => (
+    <div className="table-wrapper">
+      {loading ? (
+        <SkeletonTable rows={6} />
+      ) : rows.length > 0 ? (
+        <table className="data-table tsa-table">
+          <thead>
+            <tr>
+              <th className="col-item">Item</th>
+              <th className="col-sts">STS No.</th>
+              <th className="col-route">Route</th>
+              <th className="col-by">Submitted By</th>
+              <th className="col-date">Date</th>
+              <th className="col-qty">Lines / Qty</th>
+              <th className="col-status">Status</th>
+              <th className="col-actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const item = getRowItem(r);
+              const extraLines = item ? Math.max(0, (item.line_count || 1) - 1) : 0;
+              const isPendingRow = r.status === 'Pending';
+
+              return (
+                <tr
+                  key={r.sts_id}
+                  className="tsa-row"
+                  onClick={() => openDetail(r)}
+                >
+                  <td className="col-item">
+                    <div className="tsa-item-cell">
+                      <ItemImageThumb
+                        src={item?.item_code ? images[item.item_code] : null}
+                        alt={item?.item_code || 'item'}
+                        size={44}
+                      />
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className="tsa-item-code">{item?.item_code || '—'}</div>
+                        <div className="tsa-item-name" title={item?.item_name || ''}>
+                          {item?.item_name || '—'}
+                        </div>
+                        {extraLines > 0 && (
+                          <span className="tsa-more-chip">+{extraLines} more</span>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+
+                  <td className="col-sts">
+                    <span className="po-no-big sts-color" style={{ fontSize: 14 }}>
+                      {/* Session 13 (I4) — display "STS No. ?" until approved. */}
+                      {r.sts_no || STS_NO_PLACEHOLDER}
+                    </span>
+                  </td>
+
+                  <td className="col-route">
+                    <div className="tsa-route-cell">
+                      <div className="tsa-route-line">
+                        <span className="tsa-route-wh">
+                          {whPrimary(r.from_warehouse_name, r.from_warehouse_code)}
+                        </span>
+                        <span className="tsa-route-arrow">→</span>
+                        <span className="tsa-route-wh">
+                          {whPrimary(r.to_warehouse_name, r.to_warehouse_code)}
+                        </span>
+                      </div>
+                      <div className="tsa-route-codes">
+                        {r.from_warehouse_code || '—'} → {r.to_warehouse_code || '—'}
+                      </div>
+                    </div>
+                  </td>
+
+                  <td className="col-by">{r.submitted_by || '—'}</td>
+                  <td className="col-date">{formatDate(r.submitted_at)}</td>
+
+                  <td className="col-qty">
+                    <span className="tsa-qty">
+                      {r.line_count ?? 0} · {Number(r.total_qty) || 0}
+                    </span>
+                  </td>
+
+                  <td className="col-status"><StatusBadge status={r.status} /></td>
+
+                  <td className="col-actions" onClick={(e) => e.stopPropagation()}>
+                    {isPendingRow ? (
+                      <button
+                        type="button"
+                        className="action-btn edit"
+                        onClick={() => openDetail(r)}
+                        title="Review this request"
                       >
-                        {s.status}
-                      </span>
-                    </td>
-                    <td
-                      className="col-actions"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {renderRowActions(s)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="no-items-message">
-              <p>
-                {statusFilter === 'Pending'
-                  ? 'No pending Stock Transfer Slips right now.'
-                  : 'No slips match the current filters.'}
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Mobile cards */}
-        <div className="po-mobile-only">
-          {loading ? (
-            <div className="loading-spinner" style={{ margin: '20px auto' }} />
-          ) : slips.length > 0 ? (
-            slips.map(s => (
-              <div
-                key={s.sts_id}
-                className="po-card"
-                onClick={() => handleOpenDetail(s)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => e.key === 'Enter' && handleOpenDetail(s)}
-              >
-                <div className="po-card-row-1">
-                  <span className="po-no-big">{s.sts_no}</span>
-                  <span
-                    style={{
-                      display: 'inline-block',
-                      padding: '4px 12px',
-                      borderRadius: 999,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      letterSpacing: '0.03em',
-                      ...statusBadgeStyle(s.status),
-                    }}
-                  >
-                    {s.status}
-                  </span>
-                </div>
-                <div className="po-card-row-2">
-                  <span><strong>PO No.:</strong> {s.po_no || '—'}</span>
-                  <span><strong>Date:</strong> {formatDate(s.transfer_date)}</span>
-                </div>
-                <div
-                  className="po-card-actions"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {renderRowActions(s)}
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="no-items-message">
-              <p>
-                {statusFilter === 'Pending'
-                  ? 'No pending Stock Transfer Slips right now.'
-                  : 'No slips match the current filters.'}
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ============================================================
-          DETAIL MODAL
-          ============================================================ */}
-      {detail && (
-        <div className="pod-overlay" style={mStyles.overlay} onClick={closeDetail}>
-          <div
-            className="pod-card"
-            style={mStyles.card}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div style={mStyles.header}>
-              <div style={mStyles.headerLeft}>
-                <div style={mStyles.headerIcon}>🚚</div>
-                <div style={{ minWidth: 0 }}>
-                  <h3 style={mStyles.headerTitle}>{detail.sts_no}</h3>
-                  <div style={mStyles.headerSub}>
-                    <span
-                      style={{
-                        ...statusBadgeStyle(detail.status),
-                        padding: '2px 10px',
-                        borderRadius: 999,
-                        fontSize: 11,
-                        fontWeight: 700,
-                      }}
-                    >
-                      {detail.status}
-                    </span>
-                    {detail.po_no && (
-                      <>
-                        <span style={mStyles.headerDot}>·</span>
-                        <span>PO: <strong>{detail.po_no}</strong></span>
-                      </>
+                        Review
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="po-view-hint"
+                        onClick={() => openDetail(r)}
+                        title="View details"
+                      >
+                        View ›
+                      </button>
                     )}
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="pod-close"
-                onClick={closeDetail}
-                disabled={acting}
-                style={mStyles.closeBtn}
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="pod-body" style={mStyles.body}>
-              {/* Route card */}
-              <div className="pod-route-grid" style={mStyles.routeGrid}>
-                <div style={mStyles.routeBox}>
-                  <div style={mStyles.routeLabel}>FROM</div>
-                  <div style={mStyles.routeValue}>
-                    {detail.from_warehouse_code || '—'}
-                  </div>
-                  <div style={mStyles.routeSub}>{detail.from_warehouse_name || ''}</div>
-                </div>
-                <div style={mStyles.routeArrow}>→</div>
-                <div style={mStyles.routeBox}>
-                  <div style={mStyles.routeLabel}>TO</div>
-                  <div style={mStyles.routeValue}>
-                    {detail.to_warehouse_code || '—'}
-                  </div>
-                  <div style={mStyles.routeSub}>{detail.to_warehouse_name || ''}</div>
-                </div>
-              </div>
-
-              {/* ---------- LINES (moved up so it's the first thing you see) ---------- */}
-              <div style={mStyles.linesSection}>
-                <div style={mStyles.sectionHead}>
-                  <span style={mStyles.sectionTitle}>
-                    📦 Items to Transfer{' '}
-                    <span style={mStyles.sectionCount}>({lineCount})</span>
-                  </span>
-                  {lineCount > 0 && (
-                    <span style={mStyles.summaryChip}>
-                      Total qty: {linesTotalQty}
-                    </span>
-                  )}
-                </div>
-
-                {detailLoading ? (
-                  <div style={{ padding: 20, textAlign: 'center', color: '#64748b', fontSize: 13 }}>
-                    Loading lines…
-                  </div>
-                ) : lineCount === 0 ? (
-                  <div style={mStyles.emptyLines}>
-                    ⚠️ No line items found for this slip. The transfer may have been created without items, or the API didn't return them.
-                  </div>
-                ) : (
-                  <div style={mStyles.tableWrap}>
-                    <table style={mStyles.table}>
-                      <thead>
-                        <tr>
-                          <th style={mStyles.th}>#</th>
-                          <th style={mStyles.th}>Item</th>
-                          <th style={{ ...mStyles.th, textAlign: 'center' }}>UOM</th>
-                          <th style={{ ...mStyles.th, textAlign: 'center' }}>Qty</th>
-                          <th style={mStyles.th}>Price</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {detail.lines.map((l) => (
-                          <tr key={l.sts_line_id} style={mStyles.row}>
-                            <td style={mStyles.tdNum}>{l.line_no}</td>
-                            <td style={mStyles.tdItem}>
-                              <div style={mStyles.itemCell}>
-                                <ItemImageThumb
-                                  src={images[l.item_code]}
-                                  alt={l.item_code}
-                                  size={40}
-                                />
-                                <div style={{ minWidth: 0, flex: 1 }}>
-                                  <div style={mStyles.itemCode}>{l.item_code}</div>
-                                  <div style={mStyles.itemName} title={l.item_name}>
-                                    {l.item_name || '—'}
-                                  </div>
-                                </div>
-                              </div>
-                            </td>
-                            <td style={{ ...mStyles.td, textAlign: 'center' }}>
-                              <span style={mStyles.uomTag}>{l.uom || '—'}</span>
-                            </td>
-                            <td style={{ ...mStyles.td, textAlign: 'center', fontWeight: 700 }}>
-                              {l.qty}
-                            </td>
-                            <td style={mStyles.td}>
-                              {l.unit_price != null
-                                ? `${Number(l.unit_price).toFixed(2)} ${l.currency || ''}`
-                                : '—'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* Meta grid */}
-              <div className="pod-meta-grid" style={mStyles.metaGrid}>
-                <div style={mStyles.metaBox}>
-                  <div style={mStyles.metaLabel}>Transfer Date</div>
-                  <div style={mStyles.metaValue}>{formatDate(detail.transfer_date)}</div>
-                </div>
-                <div style={mStyles.metaBox}>
-                  <div style={mStyles.metaLabel}>Submitted By</div>
-                  <div style={mStyles.metaValue}>{detail.submitted_by || '—'}</div>
-                </div>
-                <div style={mStyles.metaBox}>
-                  <div style={mStyles.metaLabel}>Submitted At</div>
-                  <div style={mStyles.metaValue}>{formatDateTime(detail.submitted_at)}</div>
-                </div>
-              </div>
-
-              {/* Remarks */}
-              {detail.remarks && (
-                <div style={mStyles.remarksBox}>
-                  <div style={mStyles.remarksLabel}>Remarks from submitter</div>
-                  <div style={mStyles.remarksValue}>{detail.remarks}</div>
-                </div>
-              )}
-
-              {/* Rejection info */}
-              {detail.status === 'Rejected' && detail.rejection_reason && (
-                <div style={mStyles.rejectInfo}>
-                  <div style={mStyles.rejectInfoLabel}>Rejection reason</div>
-                  <div style={mStyles.rejectInfoValue}>{detail.rejection_reason}</div>
-                  <div style={mStyles.rejectInfoMeta}>
-                    by {detail.rejected_by || '—'} · {formatDateTime(detail.rejected_at)}
-                  </div>
-                </div>
-              )}
-
-              {/* ---------- WHAT'S NEXT ---------- */}
-              <div style={mStyles.nextStepBox}>
-                <div style={mStyles.nextStepLabel}>🎯 What's next</div>
-                <div style={mStyles.nextStepValue}>{nextStepForSTS(detail.status)}</div>
-              </div>
-
-              {/* ---------- PO ACTIVITY TIMELINE ---------- */}
-              {detail.po_no && (
-                <>
-                  <div style={mStyles.sectionHead}>
-                    <span style={mStyles.sectionTitle}>
-                      🕐 PO History — {detail.po_no}{' '}
-                      <span style={mStyles.sectionCount}>({poActivity.length})</span>
-                    </span>
-                  </div>
-
-                  {poActivityLoading ? (
-                    <div style={{ padding: 16, textAlign: 'center', color: '#64748b', fontSize: 13 }}>
-                      Loading PO activity…
-                    </div>
-                  ) : poActivity.length === 0 ? (
-                    <div style={{ padding: 16, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
-                      No activity recorded yet for this PO.
-                    </div>
-                  ) : (
-                    <div style={mStyles.timelineWrap}>
-                      {poActivity.map((evt, idx) => {
-                        const isLast = idx === poActivity.length - 1;
-                        const color  = activityColor(evt.event_type);
-                        return (
-                          <div key={evt.log_id} style={mStyles.timelineItem}>
-                            <div style={mStyles.timelineRail}>
-                              <div
-                                style={{
-                                  ...mStyles.timelineDot,
-                                  background: color,
-                                  boxShadow: `0 0 0 3px ${color}22`,
-                                }}
-                              >
-                                <span style={mStyles.timelineDotIcon}>
-                                  {activityIcon(evt.event_type)}
-                                </span>
-                              </div>
-                              {!isLast && <div style={mStyles.timelineLine} />}
-                            </div>
-                            <div style={mStyles.timelineBody}>
-                              <div style={mStyles.timelineSummary}>
-                                {evt.event_summary || evt.event_type}
-                              </div>
-                              <div style={mStyles.timelineMeta}>
-                                <span style={mStyles.timelineActor}>
-                                  {evt.actor || 'System'}
-                                </span>
-                                <span style={mStyles.timelineDotSep}>·</span>
-                                <span>{formatDateTime(evt.acted_at)}</span>
-                                <span style={mStyles.timelineDotSep}>·</span>
-                                <span style={{ ...mStyles.timelineTypeChip, color, borderColor: color }}>
-                                  {evt.event_type}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* Reject reason input */}
-              {rejectMode && (
-                <div style={mStyles.rejectInputBox}>
-                  <label style={mStyles.rejectInputLabel} htmlFor="sta-reason">
-                    Rejection reason *
-                  </label>
-                  <textarea
-                    id="sta-reason"
-                    value={rejectReason}
-                    onChange={(e) => setRejectReason(e.target.value)}
-                    disabled={acting}
-                    rows={3}
-                    placeholder="Explain why this slip is being rejected…"
-                    style={mStyles.rejectTextarea}
-                    autoFocus
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="pod-footer" style={mStyles.footer}>
-              {detail.status === 'Pending' && !rejectMode && (
-                <>
-                  <button
-                    type="button"
-                    className="cancel-btn"
-                    onClick={closeDetail}
-                    disabled={acting}
-                  >
-                    Close
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRejectMode(true)}
-                    disabled={acting}
-                    style={mStyles.rejectBtn}
-                  >
-                    ❌ Reject
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleApprove}
-                    disabled={acting}
-                    style={mStyles.approveBtn}
-                  >
-                    {acting ? 'Approving…' : '✅ Approve'}
-                  </button>
-                </>
-              )}
-
-              {detail.status === 'Pending' && rejectMode && (
-                <>
-                  <button
-                    type="button"
-                    className="cancel-btn"
-                    onClick={() => {
-                      setRejectMode(false);
-                      setRejectReason('');
-                    }}
-                    disabled={acting}
-                  >
-                    ← Back
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleReject}
-                    disabled={acting || !rejectReason.trim()}
-                    style={mStyles.rejectBtn}
-                  >
-                    {acting ? 'Rejecting…' : '❌ Confirm Reject'}
-                  </button>
-                </>
-              )}
-
-              {detail.status !== 'Pending' && (
-                <button
-                  type="button"
-                  className="cancel-btn"
-                  onClick={closeDetail}
-                  disabled={acting}
-                >
-                  Close
-                </button>
-              )}
-            </div>
-          </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : (
+        <div className="no-items-message">
+          <p>
+            {isPendingSegment
+              ? (pendingHasActiveFilter
+                  ? 'No pending requests match your search.'
+                  : 'No transfer requests are awaiting your approval right now.')
+              : 'No slips match the current filters.'}
+          </p>
+          {activeSegmentHasFilter && (
+            <button
+              type="button"
+              className="no-items-clear"
+              onClick={clearFilters}
+            >
+              <FiX />
+              <span>Clear filters</span>
+            </button>
+          )}
         </div>
       )}
     </div>
   );
+
+  // ============================================================
+  // Mobile cards
+  // ============================================================
+  const renderMobileCards = () => (
+    <>
+      {loading ? (
+        <SkeletonCards rows={4} />
+      ) : rows.length > 0 ? (
+        rows.map((r) => {
+          const item = getRowItem(r);
+          const extraLines = item ? Math.max(0, (item.line_count || 1) - 1) : 0;
+          const isPendingRow = r.status === 'Pending';
+
+          return (
+            <div
+              key={r.sts_id}
+              className="po-card"
+              onClick={() => openDetail(r)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Enter' && openDetail(r)}
+            >
+              <div className="po-card-row-1 tsa-card-item">
+                <div className="tsa-item-cell">
+                  <ItemImageThumb
+                    src={item?.item_code ? images[item.item_code] : null}
+                    alt={item?.item_code || 'item'}
+                    size={40}
+                  />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="tsa-item-code">{item?.item_code || '—'}</div>
+                    <div className="tsa-item-name" title={item?.item_name || ''}>
+                      {item?.item_name || '—'}
+                    </div>
+                    {extraLines > 0 && (
+                      <span className="tsa-more-chip">+{extraLines} more</span>
+                    )}
+                  </div>
+                </div>
+                <StatusBadge status={r.status} />
+              </div>
+
+              <div className="po-card-row-1">
+                <span className="po-no-big sts-color" style={{ fontSize: 16 }}>
+                  {/* Session 13 (I4) — display "STS No. ?" until approved. */}
+                  {r.sts_no || STS_NO_PLACEHOLDER}
+                </span>
+              </div>
+
+              <div className="po-card-row-2">
+                <span>
+                  <strong>From:</strong>{' '}
+                  {whPrimary(r.from_warehouse_name, r.from_warehouse_code)}
+                  {whSecondary(r.from_warehouse_name, r.from_warehouse_code)
+                    ? ` · ${r.from_warehouse_code}`
+                    : ''}
+                </span>
+                <span>
+                  <strong>To:</strong>{' '}
+                  {whPrimary(r.to_warehouse_name, r.to_warehouse_code)}
+                  {whSecondary(r.to_warehouse_name, r.to_warehouse_code)
+                    ? ` · ${r.to_warehouse_code}`
+                    : ''}
+                </span>
+              </div>
+
+              <div className="po-card-row-2">
+                <span><strong>Lines:</strong> {r.line_count ?? 0}</span>
+                <span><strong>Qty:</strong> {Number(r.total_qty) || 0}</span>
+              </div>
+
+              <div className="po-card-row-2" style={{ fontSize: 12, color: '#64748b' }}>
+                <span><strong>By:</strong> {r.submitted_by || '—'}</span>
+                <span>{formatDate(r.submitted_at)}</span>
+              </div>
+
+              <div className="po-card-actions" onClick={(e) => e.stopPropagation()}>
+                {isPendingRow ? (
+                  <button
+                    type="button"
+                    className="action-btn edit"
+                    onClick={() => openDetail(r)}
+                  >
+                    Review
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="po-view-hint"
+                    onClick={() => openDetail(r)}
+                  >
+                    View ›
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })
+      ) : (
+        <div className="no-items-message">
+          <p>
+            {isPendingSegment
+              ? (pendingHasActiveFilter
+                  ? 'No pending requests match your search.'
+                  : 'No transfer requests are awaiting your approval right now.')
+              : 'No slips match the current filters.'}
+          </p>
+          {activeSegmentHasFilter && (
+            <button
+              type="button"
+              className="no-items-clear"
+              onClick={clearFilters}
+            >
+              <FiX />
+              <span>Clear filters</span>
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  // ============================================================
+  // Approve confirmation message
+  // ============================================================
+  const approveConfirmMessage = detail ? (
+    <>
+      An STS number will be issued and this request will move to the
+      source warehouse&apos;s <strong>For Shipping</strong> queue.
+      <br /><br />
+      <strong>From:</strong>{' '}
+      {whPrimary(detail.from_warehouse_name, detail.from_warehouse_code)}
+      <br />
+      <strong>To:</strong>{' '}
+      {whPrimary(detail.to_warehouse_name, detail.to_warehouse_code)}
+
+      {draftSummary.changed > 0 && (
+        <>
+          <br /><br />
+          <span style={{ fontSize: 12.5 }}>
+            <strong>{draftSummary.changed}</strong> of{' '}
+            <strong>{draftSummary.total}</strong> line
+            {draftSummary.total === 1 ? '' : 's'} adjusted.
+            {draftSummary.dropped > 0 && ` ${draftSummary.dropped} dropped.`}
+            {draftSummary.reduced > 0 && ` ${draftSummary.reduced} reduced.`}
+            {draftSummary.raised  > 0 && ` ${draftSummary.raised} raised.`}
+          </span>
+        </>
+      )}
+
+      {draftSummary.allZeroed && (
+        <>
+          <br /><br />
+          <span style={{ fontSize: 12.5, color: '#b91c1c', fontWeight: 700 }}>
+            All lines are zeroed — this will auto-reject the slip.
+          </span>
+        </>
+      )}
+    </>
+  ) : null;
+
+  // ============================================================
+  // Main render
+  // ============================================================
+  return (
+    <div className="items-section">
+      <style>{tabCss}</style>
+      <style>{subSidebarFlagCss}</style>
+      <style>{tsaIconCss}</style>
+      <style>{tsaQtyCss}</style>
+
+      <div className="section-header">
+        <h3>
+          <span className="tsa-section-heading">
+            <FiCheckCircle />
+            <span>Stock Transfer Approval</span>
+          </span>
+        </h3>
+        <div className="header-actions">
+          <span className="item-count">
+            {pendingCount} pending · {historyCount} total
+          </span>
+          {!isPendingSegment && (
+            <button
+              type="button"
+              className="export-btn"
+              onClick={handleExport}
+              disabled={exporting || history.total === 0}
+              title="Download the currently-filtered slips as CSV"
+            >
+              {exporting ? 'Exporting…' : (
+                <>
+                  <span className="tsa-btn-icon"><FiDownload /></span>
+                  Export CSV
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="tsa-layout">
+        <aside className="tsa-subsidebar tsa-subsidebar--flag" aria-label="Queues">
+          <div className="tsa-subsidebar-flag-head">
+            <div className="tsa-subsidebar-flag-title">
+              <span className="tsa-subsidebar-flag-dot" aria-hidden="true" />
+              <span>Queues</span>
+            </div>
+            <p className="tsa-subsidebar-flag-subtitle">
+              Switch between pending approvals and full history.
+            </p>
+          </div>
+
+          <div className="tsa-subsidebar-group">
+            <button
+              type="button"
+              className={`tsa-filter-item${isPendingSegment ? ' active' : ''}`}
+              onClick={() => setSegment(SEGMENT_PENDING)}
+            >
+              <span className="tsa-filter-item-label">
+                <FiClock />
+                <span>Pending Approval</span>
+              </span>
+              <span className="tsa-filter-count">{pendingCount}</span>
+            </button>
+            <button
+              type="button"
+              className={`tsa-filter-item${!isPendingSegment ? ' active' : ''}`}
+              onClick={() => setSegment(SEGMENT_HISTORY)}
+            >
+              <span className="tsa-filter-item-label">
+                <FiList />
+                <span>All Slips</span>
+              </span>
+              <span className="tsa-filter-count">{historyCount}</span>
+            </button>
+          </div>
+        </aside>
+
+        <div className="tsa-content">
+          <div
+            style={{
+              background: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: 8,
+              padding: '10px 14px',
+              marginBottom: 16,
+              fontSize: 13,
+              color: '#1e3a8a',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              lineHeight: 1.55,
+            }}
+          >
+            <span className="tsa-info-icon" aria-hidden="true"><FiInfo /></span>
+            <span>
+              Transfer requests submitted by Stock Handlers appear in the{' '}
+              <strong>Pending Approval</strong> queue. Approving issues the
+              STS number and moves the request to the source warehouse&apos;s{' '}
+              <strong>For Shipping</strong> queue. You can also adjust the
+              approved qty per line — a reason is required for every changed
+              line. Rejecting is terminal.
+            </span>
+          </div>
+
+          <div className="dashboard-search-section">
+            <div className="dashboard-filters">
+              <div className="filter-row">
+                <div className="filter-group search-group">
+                  <label>Search</label>
+                  <input
+                    type="text"
+                    className="filter-input"
+                    placeholder="Search STS No., submitted by, warehouse…"
+                    value={activeList.search}
+                    onChange={(e) => activeList.setSearch(e.target.value)}
+                  />
+                </div>
+
+                {!isPendingSegment && (
+                  <div className="filter-group">
+                    <label>Status</label>
+                    <select
+                      className="filter-input"
+                      value={history.filters.status}
+                      onChange={(e) => history.setFilter('status', e.target.value)}
+                    >
+                      {HISTORY_STATUS_FILTERS.map((s) => (
+                        <option key={s} value={s}>
+                          {s === 'All' ? 'All statuses' : s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {!isPendingSegment && (
+                  <div className="filter-group">
+                    <label>Warehouse</label>
+                    <select
+                      className="filter-input"
+                      value={history.filters.warehouse}
+                      onChange={(e) => history.setFilter('warehouse', e.target.value)}
+                    >
+                      <option value="">All warehouses</option>
+                      {warehouses.map((w) => (
+                        <option key={w.warehouse_code} value={w.warehouse_code}>
+                          {whPrimary(w.warehouse_name, w.warehouse_code)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {!isPendingSegment && history.filters.warehouse && (
+                  <div className="filter-group">
+                    <label>Direction</label>
+                    <select
+                      className="filter-input"
+                      value={history.filters.warehouseSide}
+                      onChange={(e) => history.setFilter('warehouseSide', e.target.value)}
+                    >
+                      <option value="either">Either</option>
+                      <option value="from">From (source)</option>
+                      <option value="to">To (destination)</option>
+                    </select>
+                  </div>
+                )}
+
+                {!isPendingSegment && (
+                  <div className="filter-group">
+                    <label>Start Date</label>
+                    <input
+                      type="date"
+                      className="filter-input"
+                      value={history.filters.startDate}
+                      onChange={(e) => history.setFilter('startDate', e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {!isPendingSegment && (
+                  <div className="filter-group">
+                    <label>End Date</label>
+                    <input
+                      type="date"
+                      className="filter-input"
+                      value={history.filters.endDate}
+                      onChange={(e) => history.setFilter('endDate', e.target.value)}
+                    />
+                  </div>
+                )}
+
+                <div className="filter-group action-group">
+                  <button
+                    className="cancel-btn"
+                    onClick={clearFilters}
+                    style={{ padding: '8px 16px' }}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    className="add-user-btn"
+                    onClick={refreshCurrent}
+                    style={{ padding: '8px 16px' }}
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="daily-items-section">
+            <div className="daily-items-header">
+              <h4>
+                {isPendingSegment
+                  ? 'Requests Awaiting Your Approval'
+                  : 'All Stock Transfer Slips'}
+              </h4>
+              <span className="daily-items-count">
+                {rows.length} row{rows.length === 1 ? '' : 's'}
+              </span>
+            </div>
+
+            <div className="po-desktop-only">{renderDesktopTable()}</div>
+            <div className="po-mobile-only">{renderMobileCards()}</div>
+
+            {activeList.total > 0 && (
+              <div className="tsa-pagination">
+                <div className="tsa-pagination-info">
+                  Showing {activeList.showingStart}–{activeList.showingEnd} of {activeList.total}
+                </div>
+                <div className="tsa-pagination-controls">
+                  <button
+                    type="button"
+                    className="tsa-page-btn"
+                    onClick={activeList.prevPage}
+                    disabled={loading || activeList.page <= 1}
+                  >
+                    ‹ Prev
+                  </button>
+                  <span className="tsa-page-indicator">
+                    Page {activeList.page} of {activeList.totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="tsa-page-btn"
+                    onClick={activeList.nextPage}
+                    disabled={loading || activeList.page >= activeList.totalPages}
+                  >
+                    Next ›
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <DetailModal
+        detail={detail}
+        images={images}
+        onClose={closeDetail}
+        onApprove={handleApproveClick}
+        onReject={openReject}
+        acting={acting || detailLoading}
+        feedback={detailFeedback}
+        onDismissFeedback={() => setDetailFeedback(null)}
+        edits={edits}
+        onQtyChange={handleQtyChange}
+        onReasonChange={handleReasonChange}
+        onResetEdits={handleResetEdits}
+        summary={draftSummary}
+      />
+
+      <RejectModal
+        open={showReject && !!detail}
+        onClose={closeReject}
+        onConfirm={handleRejectConfirm}
+        transfer={detail}
+        submitting={acting}
+        feedback={rejectFeedback}
+        onDismissFeedback={() => setRejectFeedback(null)}
+      />
+
+      <ConfirmModal
+        isOpen={showApproveConfirm && !!detail}
+        onConfirm={handleApproveConfirm}
+        onCancel={handleApproveCancel}
+        title="Approve this transfer?"
+        message={approveConfirmMessage}
+        confirmLabel="Yes, Approve"
+        cancelLabel="Cancel"
+        variant="primary"
+        icon={<FiCheckCircle />}
+        isLoading={acting}
+      />
+    </div>
+  );
 };
-
-// ============================================================
-// MODAL INLINE STYLES
-// ============================================================
-const mStyles = {
-  overlay: {
-    position: 'fixed',
-    inset: 0,
-    background: 'rgba(15, 23, 42, 0.62)',
-    backdropFilter: 'blur(6px)',
-    WebkitBackdropFilter: 'blur(6px)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10000,
-    padding: 'clamp(8px, 2vw, 24px)',
-    animation: 'podFadeIn 0.18s ease',
-  },
-  card: {
-    background: '#ffffff',
-    borderRadius: 'clamp(12px, 1.5vw, 18px)',
-    width: '100%',
-    maxWidth: 1080,
-    maxHeight: '92vh',
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-    boxShadow:
-      '0 24px 64px rgba(15, 23, 42, 0.28), 0 4px 14px rgba(15, 23, 42, 0.14)',
-    fontFamily:
-      "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-    animation: 'podSlideUp 0.22s cubic-bezier(0.34, 1.3, 0.64, 1)',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    padding: 'clamp(14px, 1.8vw, 20px) clamp(18px, 2.4vw, 26px)',
-    borderBottom: '1px solid #e5e7eb',
-    background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
-    flexShrink: 0,
-  },
-  headerLeft: { display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 },
-  headerIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
-    color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: 22,
-    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.32)',
-    flexShrink: 0,
-  },
-  headerTitle: {
-    margin: 0,
-    fontSize: 'clamp(18px, 1.8vw, 22px)',
-    fontWeight: 700,
-    color: '#0f172a',
-    fontFamily: "'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace",
-    letterSpacing: '-0.01em',
-    lineHeight: 1.2,
-  },
-  headerSub: {
-    fontSize: 'clamp(11px, 1vw, 13px)',
-    color: '#64748b',
-    marginTop: 4,
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 6,
-  },
-  headerDot: { color: '#cbd5e1' },
-  closeBtn: {
-    background: 'transparent',
-    border: 'none',
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    cursor: 'pointer',
-    fontSize: 18,
-    color: '#64748b',
-    flexShrink: 0,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  body: {
-    flex: 1,
-    overflowY: 'auto',
-    padding: 'clamp(16px, 2vw, 24px)',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 'clamp(12px, 1.4vw, 16px)',
-    background: '#ffffff',
-  },
-  footer: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 10,
-    padding: 'clamp(12px, 1.5vw, 16px) clamp(18px, 2.4vw, 26px)',
-    borderTop: '1px solid #e5e7eb',
-    background: '#f8fafc',
-    flexShrink: 0,
-    flexWrap: 'wrap',
-  },
-
-  routeGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr auto 1fr',
-    gap: 12,
-    alignItems: 'center',
-  },
-  routeBox: {
-    padding: '14px 16px',
-    background: 'linear-gradient(135deg, #f0fdfa 0%, #ecfeff 100%)',
-    border: '1px solid #99f6e4',
-    borderRadius: 10,
-    textAlign: 'center',
-  },
-  routeLabel: {
-    fontSize: 10,
-    fontWeight: 700,
-    color: '#0f766e',
-    textTransform: 'uppercase',
-    letterSpacing: '0.08em',
-    marginBottom: 4,
-  },
-  routeValue: {
-    fontSize: 'clamp(15px, 1.5vw, 18px)',
-    fontWeight: 700,
-    color: '#0f172a',
-    fontFamily: "'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace",
-  },
-  routeSub: {
-    fontSize: 12,
-    color: '#475569',
-    marginTop: 2,
-  },
-  routeArrow: {
-    fontSize: 24,
-    color: '#0f766e',
-    fontWeight: 700,
-  },
-
-  // Prominent lines section
-  linesSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 8,
-    padding: 14,
-    background: 'linear-gradient(135deg, #fefce8 0%, #fef9c3 100%)',
-    border: '2px solid #fde68a',
-    borderRadius: 12,
-  },
-  emptyLines: {
-    padding: '16px 18px',
-    background: '#fff',
-    borderRadius: 8,
-    fontSize: 13,
-    color: '#92400e',
-    textAlign: 'center',
-    lineHeight: 1.5,
-    border: '1px dashed #fcd34d',
-  },
-
-  metaGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-    gap: 12,
-  },
-  metaBox: {
-    padding: '10px 14px',
-    background: '#f8fafc',
-    border: '1px solid #e2e8f0',
-    borderRadius: 8,
-  },
-  metaLabel: {
-    fontSize: 10,
-    fontWeight: 700,
-    color: '#64748b',
-    textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-    marginBottom: 3,
-  },
-  metaValue: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: '#0f172a',
-    wordBreak: 'break-word',
-  },
-
-  remarksBox: {
-    padding: '12px 14px',
-    background: '#fffbeb',
-    border: '1px solid #fde68a',
-    borderRadius: 8,
-  },
-  remarksLabel: {
-    fontSize: 10,
-    fontWeight: 700,
-    color: '#92400e',
-    textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-    marginBottom: 4,
-  },
-  remarksValue: {
-    fontSize: 13,
-    color: '#78350f',
-    lineHeight: 1.5,
-    whiteSpace: 'pre-wrap',
-  },
-
-  rejectInfo: {
-    padding: '12px 14px',
-    background: '#fef2f2',
-    border: '1px solid #fecaca',
-    borderRadius: 8,
-  },
-  rejectInfoLabel: {
-    fontSize: 10,
-    fontWeight: 700,
-    color: '#991b1b',
-    textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-    marginBottom: 4,
-  },
-  rejectInfoValue: {
-    fontSize: 13,
-    color: '#7f1d1d',
-    lineHeight: 1.5,
-    whiteSpace: 'pre-wrap',
-  },
-  rejectInfoMeta: {
-    fontSize: 11,
-    color: '#b91c1c',
-    marginTop: 6,
-    fontStyle: 'italic',
-  },
-
-  sectionHead: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    flexWrap: 'wrap',
-  },
-  sectionTitle: { fontSize: 14, fontWeight: 700, color: '#0f172a' },
-  sectionCount: { color: '#64748b', fontWeight: 500 },
-  summaryChip: {
-    fontSize: 12,
-    fontWeight: 600,
-    padding: '5px 12px',
-    background: '#eef2ff',
-    color: '#4338ca',
-    borderRadius: 999,
-  },
-
-  tableWrap: {
-    overflow: 'auto',
-    maxHeight: '44vh',
-    border: '1px solid #e2e8f0',
-    borderRadius: 10,
-    background: '#fff',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    minWidth: 560,
-    fontSize: 13,
-  },
-  th: {
-    padding: '10px 12px',
-    textAlign: 'left',
-    fontSize: 10,
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-    color: '#64748b',
-    background: '#f8fafc',
-    borderBottom: '1px solid #e2e8f0',
-    position: 'sticky',
-    top: 0,
-    zIndex: 1,
-    whiteSpace: 'nowrap',
-  },
-  row: { borderBottom: '1px solid #f1f5f9' },
-  td: { padding: '8px 12px', color: '#0f172a', verticalAlign: 'middle' },
-  tdNum: {
-    padding: '8px 12px',
-    color: '#64748b',
-    fontWeight: 700,
-    fontFamily: "'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace",
-    fontSize: 12,
-  },
-  tdItem: { padding: '8px 12px', verticalAlign: 'middle', minWidth: 200 },
-  itemCell: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 },
-  itemCode: {
-    fontWeight: 700,
-    fontSize: 12,
-    fontFamily: "'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace",
-    color: '#4338ca',
-    lineHeight: 1.2,
-  },
-  itemName: {
-    fontSize: 11,
-    color: '#475569',
-    marginTop: 1,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    lineHeight: 1.3,
-  },
-  uomTag: {
-    display: 'inline-block',
-    padding: '2px 8px',
-    background: '#f1f5f9',
-    color: '#334155',
-    borderRadius: 6,
-    fontSize: 10,
-    fontWeight: 600,
-    fontFamily: "'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace",
-  },
-
-  nextStepBox: {
-    padding: '12px 16px',
-    background: 'linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)',
-    border: '1px solid #c7d2fe',
-    borderRadius: 10,
-  },
-  nextStepLabel: {
-    fontSize: 10,
-    fontWeight: 700,
-    color: '#4338ca',
-    textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-    marginBottom: 4,
-  },
-  nextStepValue: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: '#1e1b4b',
-    lineHeight: 1.5,
-  },
-
-  timelineWrap: {
-    display: 'flex',
-    flexDirection: 'column',
-    padding: '4px 0',
-  },
-  timelineItem: {
-    display: 'flex',
-    gap: 14,
-    alignItems: 'flex-start',
-  },
-  timelineRail: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    flexShrink: 0,
-    width: 32,
-  },
-  timelineDot: {
-    width: 28,
-    height: 28,
-    borderRadius: '50%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: 700,
-  },
-  timelineDotIcon: {
-    fontSize: 13,
-    lineHeight: 1,
-  },
-  timelineLine: {
-    width: 2,
-    flex: 1,
-    minHeight: 24,
-    background: '#e2e8f0',
-    margin: '2px 0',
-  },
-  timelineBody: {
-    flex: 1,
-    paddingBottom: 14,
-    minWidth: 0,
-  },
-  timelineSummary: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: '#0f172a',
-    lineHeight: 1.4,
-    wordBreak: 'break-word',
-  },
-  timelineMeta: {
-    marginTop: 4,
-    fontSize: 11,
-    color: '#64748b',
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 6,
-  },
-  timelineActor: {
-    fontFamily: "'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace",
-    fontWeight: 600,
-    color: '#475569',
-  },
-  timelineDotSep: { color: '#cbd5e1' },
-  timelineTypeChip: {
-    display: 'inline-block',
-    padding: '1px 7px',
-    border: '1px solid',
-    borderRadius: 999,
-    fontSize: 10,
-    fontWeight: 700,
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase',
-  },
-
-  rejectInputBox: {
-    marginTop: 4,
-    padding: '12px 14px',
-    background: '#fef2f2',
-    border: '1px solid #fecaca',
-    borderRadius: 8,
-  },
-  rejectInputLabel: {
-    display: 'block',
-    fontSize: 12,
-    fontWeight: 700,
-    color: '#991b1b',
-    marginBottom: 6,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-  },
-  rejectTextarea: {
-    width: '100%',
-    padding: '10px 12px',
-    fontSize: 14,
-    border: '1.5px solid #ef4444',
-    borderRadius: 7,
-    background: '#fff',
-    color: '#0f172a',
-    fontFamily: 'inherit',
-    outline: 'none',
-    resize: 'vertical',
-    minHeight: 70,
-    boxSizing: 'border-box',
-  },
-
-  approveBtn: {
-    padding: '10px 22px',
-    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: 8,
-    fontSize: 14,
-    fontWeight: 700,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.32)',
-    transition: 'transform 0.15s ease, box-shadow 0.2s ease',
-  },
-  rejectBtn: {
-    padding: '10px 22px',
-    background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: 8,
-    fontSize: 14,
-    fontWeight: 700,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    boxShadow: '0 4px 12px rgba(239, 68, 68, 0.32)',
-    transition: 'transform 0.15s ease, box-shadow 0.2s ease',
-  },
-};
-
-// ============================================================
-// RESPONSIVE CSS
-// ============================================================
-const approvalCss = `
-@keyframes podFadeIn { from { opacity: 0 } to { opacity: 1 } }
-@keyframes podSlideUp { from { opacity: 0; transform: translateY(16px) scale(0.98) } to { opacity: 1; transform: translateY(0) scale(1) } }
-
-.po-compact-table {
-  width: 100%;
-  min-width: 780px;
-  table-layout: fixed;
-}
-.po-compact-table .col-sts-no  { width: 22%; }
-.po-compact-table .col-po-no   { width: 16%; }
-.po-compact-table .col-date    { width: 22%; }
-.po-compact-table .col-status  { width: 18%; }
-.po-compact-table .col-actions { width: 22%; }
-
-.po-compact-table thead th,
-.po-compact-table tbody td {
-  text-align: left;
-}
-
-.po-compact-table thead th.col-actions,
-.po-compact-table tbody td.col-actions {
-  text-align: right;
-  padding-left: 4px;
-  padding-right: 12px;
-}
-
-.po-compact-table thead th {
-  padding: 16px 18px;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: #475569;
-}
-
-.po-compact-table tbody td {
-  padding: 18px;
-  font-size: 16px;
-  vertical-align: middle;
-}
-
-.po-no-big {
-  display: inline-block;
-  font-family: 'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace;
-  font-size: 22px;
-  font-weight: 700;
-  color: #4338ca;
-  letter-spacing: 0.02em;
-  line-height: 1.2;
-  word-break: break-word;
-}
-
-.po-clickable-row {
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-.po-clickable-row:hover {
-  background: #eef2ff !important;
-}
-.po-clickable-row:active {
-  background: #e0e7ff !important;
-}
-
-.po-compact-table .col-actions .action-buttons {
-  justify-content: flex-end;
-  gap: 4px;
-  flex-wrap: nowrap;
-}
-.po-compact-table .col-actions .action-btn {
-  padding: 9px 18px;
-  font-size: 14px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.po-view-hint {
-  display: inline-block;
-  font-size: 14px;
-  font-weight: 600;
-  color: #4338ca;
-  padding: 8px 14px;
-  border: 1px solid #c7d2fe;
-  background: #eef2ff;
-  border-radius: 8px;
-  white-space: nowrap;
-  cursor: pointer;
-  font-family: inherit;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
-}
-.po-view-hint:hover {
-  background: #e0e7ff;
-  border-color: #a5b4fc;
-}
-.po-view-hint:active {
-  transform: scale(0.97);
-}
-.po-view-hint:focus-visible {
-  outline: 2px solid #6366f1;
-  outline-offset: 2px;
-}
-
-.po-desktop-only { display: block; }
-.po-mobile-only  { display: none; }
-
-.po-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  background: #ffffff;
-  margin-bottom: 10px;
-  cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-.po-card:active {
-  border-color: #6366f1;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.15);
-}
-.po-card-row-1 {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.po-card-row-2 {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 18px;
-  font-size: 13px;
-  color: #475569;
-}
-.po-card-row-2 strong {
-  color: #64748b;
-  font-weight: 600;
-  margin-right: 4px;
-}
-.po-card-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed #e5e7eb;
-  min-height: 30px;
-}
-
-.pod-close:hover { background: #f1f5f9; color: #0f172a; }
-.pod-body::-webkit-scrollbar { width: 8px; }
-.pod-body::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
-.pod-body::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-.pod-body::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-
-.pod-route-grid {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 12px;
-  align-items: center;
-}
-
-@media (max-width: 720px) {
-  .pod-footer button { flex: 1 1 auto; }
-  .pod-footer { justify-content: stretch !important; }
-  .pod-route-grid { grid-template-columns: 1fr !important; }
-}
-
-@media (max-width: 640px) {
-  .po-desktop-only { display: none !important; }
-  .po-mobile-only  { display: block !important; }
-}
-
-@media (max-width: 480px) {
-  .pod-overlay { padding: 0; }
-  .pod-card {
-    max-height: 100vh;
-    border-radius: 0;
-    width: 100vw;
-    height: 100vh;
-  }
-  .po-no-big { font-size: 20px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pod-card, .pod-overlay { animation: none !important; }
-  .po-card, .po-clickable-row { transition: none !important; }
-  .po-view-hint { transition: none !important; }
-}
-`;
 
 export default TabStockTransferApproval;

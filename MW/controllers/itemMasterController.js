@@ -130,16 +130,29 @@ const createItemMaster = async (req, res) => {
 };
 
 /**
- * Get all items with pagination and search
- * Converts Item_Image from binary to base64 data URL
+ * Get all items with pagination, search, and column filters.
+ *
+ * Query params:
+ *   page            (Int,  default 1)
+ *   limit           (Int,  default 50)
+ *   search          (Str)  → LIKE across Item_Code / Description / Uom / PC / Cat
+ *   gl_class        (Int)  → Gl_Class = @gl_class
+ *   purchase_class  (Str)  → Purchase_Class = @purchase_class
+ *   category        (Str)  → Category = @category
  */
 const getAllItemMasters = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
+    const page  = parseInt(req.query.page, 10)  || 1;
+    const limit = parseInt(req.query.limit, 10) || 50;
     const search = req.query.search || '';
 
-    const result = await ItemMasterModel.getAll(page, limit, search);
+    const filters = {
+      gl_class:       req.query.gl_class       || '',
+      purchase_class: req.query.purchase_class || '',
+      category:       req.query.category       || '',
+    };
+
+    const result = await ItemMasterModel.getAll(page, limit, search, filters);
 
     // Convert Item_Image from buffer to base64 for each item
     const dataWithImages = result.data.map(item => convertItemImage(item));
@@ -154,6 +167,24 @@ const getAllItemMasters = async (req, res) => {
   } catch (error) {
     console.error('Error fetching item masters:', error);
     res.status(500).json({ message: 'Internal server error', error: error.message });
+  }
+};
+
+/**
+ * Distinct filter options for the Item Master filter bar.
+ * Returns: { success, data: { gl_classes, purchase_classes, categories } }
+ */
+const getItemFilterOptions = async (req, res) => {
+  try {
+    const options = await ItemMasterModel.getFilterOptions();
+    res.status(200).json({ success: true, data: options });
+  } catch (error) {
+    console.error('Error fetching item filter options:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
+    });
   }
 };
 
@@ -389,6 +420,7 @@ const deleteItemMaster = async (req, res) => {
 module.exports = {
   createItemMaster,
   getAllItemMasters,
+  getItemFilterOptions,
   getItemMasterByCode,
   getItemImagesByCodes,
   updateItemMaster,

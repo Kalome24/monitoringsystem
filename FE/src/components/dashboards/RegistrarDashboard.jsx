@@ -1,5 +1,17 @@
 // src/components/dashboards/RegistrarDashboard.jsx
 import React, { useCallback, useEffect, useState } from 'react';
+import {
+  FiBarChart2,
+  FiUpload,
+  FiInbox,
+  FiTruck,
+  FiAlertTriangle,
+  FiPackage,
+  FiHome,
+  FiActivity,
+  FiFileText,
+} from 'react-icons/fi';
+import { FaCar } from 'react-icons/fa'; // <-- CHANGED ICON
 import DashboardLayout from '../../layout/DashboardLayout';
 import AssignmentBadge from '../../layout/AssignmentBadge';
 import { useAdminData } from '../../hooks/useAdminData';
@@ -8,10 +20,14 @@ import { getUser } from '../../secure/auth';
 import { usePermissions } from '../../permissions/usePermissions';
 import TabDashboard from '../admin/TabDashboard';
 import TabItemMasters from '../admin/TabItemMasters';
+import TabEquipmentMasters from '../admin/TabEquipmentMasters';
 import TabItemsReceived from '../registrar/TabItemsReceived';
-import TabDamagedItems from '../registrar/TabDamagedItems';
-import TabStockTransfer from '../registrar/TabStockTransfer';
+import TabDamagedItems from '../shared/TabDamagedItems';
+import TabInTransitReceive from '../registrar/TabInTransitReceive';
+import TabImportPo from '../registrar/TabImportPo';
 import TabWarehouse from '../admin/TabWarehouse';
+import TabAudit from '../admin/TabAudit';
+import TabCostCenter from '../admin/TabCostCenter';
 
 const POLL_INTERVAL_MS = 60000; // refresh badge every 60s
 
@@ -24,6 +40,8 @@ const RegistrarDashboard = () => {
   const currentUser = getUser();
 
   const canSeeStockTransfer = can('stocktransfer.view');
+  const canImportPo = can('importpo.create');
+  const canSeeEquipment = can('equipmentmasters.view');
 
   // ---------- Sidebar badge: poll incoming STS count ----------
   const refreshIncomingCount = useCallback(async () => {
@@ -59,27 +77,44 @@ const RegistrarDashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canSeeStockTransfer, currentUser?.id]);
 
+  // ── Sidebar groups ────────────────────────────────────────────────
   const menuGroups = [
     {
       title: 'Main',
       items: [
-        { id: 'dashboard', label: 'Dashboard & Reports', icon: '📊', capability: 'dashboard.view' },
+        { id: 'dashboard', label: 'Dashboard & Reports', icon: <FiBarChart2 />, capability: 'dashboard.view' },
       ],
     },
     {
-      title: 'Inventory',
+      title: 'Purchase Orders',
       items: [
-        { id: 'itemsreceived', label: 'Receive PO/PR', icon: '📥', capability: 'itemsreceived.view' },
+        ...(canImportPo
+          ? [{ id: 'importpo', label: 'Import POs', icon: <FiUpload />, capability: 'importpo.create' }]
+          : []),
+        { id: 'itemsreceived', label: 'Received Items', icon: <FiInbox />, capability: 'itemsreceived.view' },
+      ],
+    },
+    {
+      title: 'Warehouse Operations',
+      items: [
         {
-          id: 'stocktransfer',
-          label: 'Stock Transfer',
-          icon: '🚚',
-          capability: 'stocktransfer.view',
+          id: 'intransit',
+          label: 'In-Transit for Receiving',
+          icon: <FiTruck />,
+          capability: 'stocktransfer.receive',
           badge: incomingCount,
         },
-        { id: 'damageditems', label: 'Damaged Items', icon: '⚠️', capability: 'damageditems.view' },
-        { id: 'itemmasters',  label: 'Item Masters',  icon: '📋', capability: 'itemmasters.view' },
-        { id: 'warehouse',    label: 'Warehouse',     icon: '🏭', capability: 'warehouse.view' },
+        { id: 'damageditems', label: 'Damaged Items', icon: <FiAlertTriangle />, capability: 'damageditems.view' },
+        { id: 'activity',     label: 'Activity Feed', icon: <FiActivity />,      capability: null },
+      ],
+    },
+    {
+      title: 'Reference',
+      items: [
+        { id: 'itemmasters', label: 'Item Masters', icon: <FiPackage />, capability: 'itemmasters.view' },
+        ...(canSeeEquipment ? [{ id: 'equipmentmasters', label: 'Equipment Master', icon: <FaCar />, capability: 'equipmentmasters.view' }] : []), // <-- CHANGED ICON
+        { id: 'costcenter',  label: 'Cost Center',  icon: <FiFileText />, capability: 'costcenter.view' },
+        { id: 'warehouse',   label: 'Warehouse',    icon: <FiHome />,    capability: 'warehouse.view' },
       ],
     },
   ];
@@ -87,15 +122,19 @@ const RegistrarDashboard = () => {
   const renderTab = () => {
     switch (activeTab) {
       case 'dashboard':     return <TabDashboard adminData={adminData} />;
+      case 'importpo':      return <TabImportPo />;
       case 'itemsreceived': return <TabItemsReceived adminData={adminData} />;
-      case 'stocktransfer':
-        return (
-          <TabStockTransfer
-            onIncomingCountChange={setIncomingCount}
-          />
-        );
+      case 'intransit':     return <TabInTransitReceive />;
       case 'damageditems':  return <TabDamagedItems />;
+      case 'activity':      return (
+        <TabAudit
+          lockWarehouse
+          defaultWarehouseCode={currentUser?.warehouse_code || null}
+        />
+      );
       case 'itemmasters':   return <TabItemMasters adminData={adminData} />;
+      case 'equipmentmasters': return <TabEquipmentMasters adminData={adminData} />;
+      case 'costcenter':    return <TabCostCenter adminData={adminData} />;
       case 'warehouse':     return <TabWarehouse adminData={adminData} />;
       default:              return null;
     }

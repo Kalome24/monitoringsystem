@@ -14,8 +14,13 @@ router.post('/images', itemMasterController.getItemImagesByCodes);
 // Create a new item in item_master table
 router.post('/', itemMasterController.createItemMaster);
 
-// Get all items with pagination & search
+// Get all items with pagination, search & column filters
 router.get('/', itemMasterController.getAllItemMasters);
+
+// Filter option values (distinct GL Class / Purchase Class / Category).
+// MUST be above /:itemCode so Express doesn't treat "filter-options" as
+// an item code.
+router.get('/filter-options', itemMasterController.getItemFilterOptions);
 
 // Get a single item by Item_Code
 router.get('/:itemCode', itemMasterController.getItemMasterByCode);

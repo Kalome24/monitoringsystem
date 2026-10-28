@@ -1,8 +1,18 @@
 // src/components/handler/TabItemsReleased.jsx
 import React, { useEffect, useRef, useState } from 'react';
+import {
+  FiSend,
+  FiPlus,
+  FiX,
+  FiSearch,
+  FiCheckCircle,
+  FiList,
+  FiTrash2,
+} from 'react-icons/fi';
 import { warehouseApi } from '../../services/api';
 import { getUser } from '../../secure/auth';
 import { usePermissions } from '../../permissions/usePermissions';
+import { useToast } from '../shared/ToastProvider';
 
 const TabItemsReleased = ({ adminData }) => {
   const {
@@ -17,12 +27,12 @@ const TabItemsReleased = ({ adminData }) => {
   const currentUser = getUser();
   const userWarehouseId = currentUser?.warehouse_assigned;
   const barcodeInputRef = useRef(null);
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
 
   const [items, setItems] = useState([]);
   const [releaseRecords, setReleaseRecords] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
-  const [assignedWarehouse, setAssignedWarehouse] = useState(null);
 
   const [searchTerm, setSearchTerm] = useState(releasedSearchTerm || '');
   const [startDate, setStartDate] = useState(releasedStartDate || '');
@@ -102,10 +112,6 @@ const TabItemsReleased = ({ adminData }) => {
         ? whRes.data.filter(w => w.status === 'Active')
         : [{ warehouse_id: 1, warehouse_name: 'Main Warehouse', warehouse_code: 'WH-001', status: 'Active' }];
       setWarehouses(whList);
-      if (userWarehouseId) {
-        const wh = whList.find(w => w.warehouse_id === userWarehouseId);
-        setAssignedWarehouse(wh || null);
-      }
       const itemsData = generateMockItems(whList);
       setItems(itemsData);
       setReleaseRecords(generateMockReleaseRecords(itemsData, userWarehouseId));
@@ -136,9 +142,9 @@ const TabItemsReleased = ({ adminData }) => {
   };
 
   const handleReleaseBarcodeSubmit = () => {
-    if (!releaseBarcodeInput.trim()) return alert('Please enter or scan a barcode.');
+    if (!releaseBarcodeInput.trim()) return toast.error('Please enter or scan a barcode.');
     const found = findItemByBarcodeOrCode(releaseBarcodeInput.trim());
-    if (!found) { alert('Item not found.'); setReleaseScannedItem(null); return; }
+    if (!found) { toast.error('Item not found.'); setReleaseScannedItem(null); return; }
     setReleaseScannedItem(found);
     setReleaseCurrentItem({
       item_id: found.id, item_name: found.item_name, item_code: found.item_code,
@@ -153,9 +159,9 @@ const TabItemsReleased = ({ adminData }) => {
   const handleReleaseCurrentChange = (e) => { const { name, value } = e.target; setReleaseCurrentItem(prev => ({ ...prev, [name]: name === 'quantity' ? parseInt(value) || 0 : value })); };
 
   const handleAddAnotherReleaseItem = () => {
-    if (!releaseScannedItem) return alert('Please scan a valid item first.');
-    if (releaseCurrentItem.quantity < 1) return alert('Quantity must be at least 1.');
-    if (releaseCurrentItem.quantity > releaseCurrentItem.current_stock) return alert(`Insufficient stock. Available: ${releaseCurrentItem.current_stock}`);
+    if (!releaseScannedItem) return toast.error('Please scan a valid item first.');
+    if (releaseCurrentItem.quantity < 1) return toast.error('Quantity must be at least 1.');
+    if (releaseCurrentItem.quantity > releaseCurrentItem.current_stock) return toast.error(`Insufficient stock. Available: ${releaseCurrentItem.current_stock}`);
     const newItem = {
       id: Date.now() + Math.random(),
       item_id: releaseCurrentItem.item_id,
@@ -181,21 +187,21 @@ const TabItemsReleased = ({ adminData }) => {
   };
 
   const handleSubmitAllReleaseItems = async () => {
-    if (releaseItemsList.length === 0) return alert('Please add at least one item to release.');
-    if (!releaseShared.reason.trim()) return alert('Please provide a reason for the release.');
+    if (releaseItemsList.length === 0) return toast.error('Please add at least one item to release.');
+    if (!releaseShared.reason.trim()) return toast.error('Please provide a reason for the release.');
     const targetWarehouseId = releaseShared.warehouse_id || userWarehouseId;
-    if (!targetWarehouseId) return alert('No warehouse selected.');
+    if (!targetWarehouseId) return toast.error('No warehouse selected.');
 
     const itemsMap = {};
     (items || []).forEach(item => { itemsMap[item.id] = item; });
     for (const releaseItem of releaseItemsList) {
       const found = itemsMap[releaseItem.item_id];
-      if (!found) return alert(`Item ${releaseItem.item_name} no longer exists.`);
+      if (!found) return toast.error(`Item ${releaseItem.item_name} no longer exists.`);
       const totalRequested = releaseItemsList.filter(i => i.item_id === releaseItem.item_id).reduce((s,i) => s + i.quantity, 0);
-      if (totalRequested > found.current_stock) return alert(`Insufficient stock for ${releaseItem.item_name}. Available: ${found.current_stock}`);
+      if (totalRequested > found.current_stock) return toast.error(`Insufficient stock for ${releaseItem.item_name}. Available: ${found.current_stock}`);
     }
 
-    let confirmMsg = `📤 Confirm Release\n\n`;
+    let confirmMsg = `Confirm Release\n\n`;
     releaseItemsList.forEach((item, idx) => {
       confirmMsg += `${idx+1}. ${item.item_code} - ${item.item_name}\n   Qty: ${item.quantity} ${item.unit}\n\n`;
     });
@@ -222,14 +228,14 @@ const TabItemsReleased = ({ adminData }) => {
       }
       setItems(updatedItems);
       setReleaseRecords([...newRecords, ...(releaseRecords || [])]);
-      alert(`✅ Release successful! ${newRecords.length} item(s) released.`);
+      toast.success(`Release successful! ${newRecords.length} item(s) released.`);
       setReleaseItemsList([]);
       setShowReleaseForm(false);
       setReleaseScannedItem(null);
       setReleaseBarcodeInput('');
     } catch (error) {
       console.error('Error submitting release:', error);
-      alert('❌ Error submitting release.');
+      toast.error('Error submitting release.');
     } finally { setLoading(false); }
   };
 
@@ -267,12 +273,20 @@ const TabItemsReleased = ({ adminData }) => {
 
   return (
     <div className="items-section">
+      <style>{tabReleasedIconCss}</style>
+
       <div className="section-header">
-        <h3>📤 Items Released</h3>
+        <h3>
+          <FiSend className="section-heading-icon" />
+          <span>Items Released</span>
+        </h3>
         <div className="header-actions">
           <span className="item-count">Total: {(releaseRecords || []).length} releases</span>
           {can('itemsreleased.create') && (
-            <button className="add-user-btn" onClick={handleShowReleaseForm}>➕ New Release</button>
+            <button className="add-user-btn" onClick={handleShowReleaseForm}>
+              <FiPlus className="btn-icon" />
+              <span>New Release</span>
+            </button>
           )}
         </div>
       </div>
@@ -280,8 +294,13 @@ const TabItemsReleased = ({ adminData }) => {
       {can('itemsreleased.create') && showReleaseForm && (
         <div className="release-form" style={{ background:'#fafaf8', borderRadius:12, border:'1px solid #e5e5e0', marginBottom:20, overflow:'hidden' }}>
           <div className="form-header" style={{ display:'flex', justifyContent:'space-between', padding:'16px 20px', background:'#f5f5f0', borderBottom:'1px solid #e5e5e0' }}>
-            <h4>📤 Release Stock – {releaseItemsList.length} item(s) added</h4>
-            <button className="close-form-btn" onClick={handleCloseReleaseForm}>✕</button>
+            <h4 style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <FiSend style={{ color: '#1a1f26' }} />
+              <span>Release Stock – {releaseItemsList.length} item(s) added</span>
+            </h4>
+            <button className="close-form-btn" onClick={handleCloseReleaseForm} aria-label="Close">
+              <FiX />
+            </button>
           </div>
 
           <div className="form-body" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, padding:20 }}>
@@ -304,14 +323,20 @@ const TabItemsReleased = ({ adminData }) => {
               <label>Scan Barcode / Enter Item Code</label>
               <div style={{ display:'flex', gap:8 }}>
                 <input id="releaseBarcodeInput" ref={barcodeInputRef} type="text" value={releaseBarcodeInput} onChange={(e) => setReleaseBarcodeInput(e.target.value)} onKeyPress={handleReleaseBarcodeKeyPress} placeholder="Scan or type item code..." style={{ flex:1 }} />
-                <button className="search-btn" onClick={handleReleaseBarcodeSubmit} style={{ padding:'8px 20px', background:'#00d2c8', color:'#fff', border:'none', borderRadius:6 }}>🔍 Scan</button>
+                <button className="search-btn" onClick={handleReleaseBarcodeSubmit} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding:'8px 20px', background:'#00d2c8', color:'#fff', border:'none', borderRadius:6 }}>
+                  <FiSearch style={{ width: '1em', height: '1em', strokeWidth: 2.4 }} />
+                  <span>Scan</span>
+                </button>
               </div>
             </div>
 
             {releaseScannedItem && (
               <>
                 <div style={{ gridColumn:'1 / -1', background:'#f0f8ff', padding:12, borderRadius:8, border:'1px solid #00d2c8' }}>
-                  <h5 style={{ margin:'0 0 8px 0', color:'#008a82' }}>✓ Item Found</h5>
+                  <h5 style={{ margin:'0 0 8px 0', color:'#008a82', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <FiCheckCircle style={{ width: '1em', height: '1em', strokeWidth: 2.4 }} />
+                    <span>Item Found</span>
+                  </h5>
                   <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
                     <div><strong>Code:</strong> {releaseScannedItem.item_code}</div>
                     <div><strong>Name:</strong> {releaseScannedItem.item_name}</div>
@@ -321,7 +346,10 @@ const TabItemsReleased = ({ adminData }) => {
                 </div>
                 <div className="form-group"><label>Quantity *</label><input type="number" name="quantity" value={releaseCurrentItem.quantity} onChange={handleReleaseCurrentChange} min="1" max={releaseCurrentItem.current_stock} /></div>
                 <div className="form-group" style={{ gridColumn:'1 / -1' }}>
-                  <button className="add-user-btn" onClick={handleAddAnotherReleaseItem} style={{ background:'#e3742a', width:'100%' }}>➕ Add Another Item</button>
+                  <button className="add-user-btn" onClick={handleAddAnotherReleaseItem} style={{ background:'#e3742a', width:'100%' }}>
+                    <FiPlus className="btn-icon" />
+                    <span>Add Another Item</span>
+                  </button>
                 </div>
               </>
             )}
@@ -329,7 +357,10 @@ const TabItemsReleased = ({ adminData }) => {
 
           {releaseItemsList.length > 0 && (
             <div style={{ padding:'0 20px 16px' }}>
-              <h5 style={{ marginBottom:8 }}>📋 Items to Release ({releaseItemsList.length})</h5>
+              <h5 style={{ marginBottom:8, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <FiList style={{ width: '1em', height: '1em', strokeWidth: 2.4 }} />
+                <span>Items to Release ({releaseItemsList.length})</span>
+              </h5>
               <div className="table-wrapper">
                 <table className="data-table" style={{ minWidth:'auto' }}>
                   <thead><tr><th>#</th><th>Code</th><th>Name</th><th>Qty</th><th>Unit</th><th>Size</th><th>Action</th></tr></thead>
@@ -349,15 +380,23 @@ const TabItemsReleased = ({ adminData }) => {
                 </table>
               </div>
               <div style={{ display:'flex', gap:8, marginTop:8 }}>
-                <button className="cancel-btn" onClick={clearReleaseList} style={{ background:'#ef4444', color:'#fff', border:'none' }}>🗑️ Clear All</button>
+                <button className="cancel-btn" onClick={clearReleaseList} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background:'#ef4444', color:'#fff', border:'none' }}>
+                  <FiTrash2 style={{ width: '1em', height: '1em', strokeWidth: 2.4 }} />
+                  <span>Clear All</span>
+                </button>
               </div>
             </div>
           )}
 
           <div className="form-footer" style={{ display:'flex', justifyContent:'flex-end', gap:12, padding:'16px 20px', borderTop:'1px solid #e5e5e0', background:'#f5f5f0' }}>
             <button className="cancel-btn" onClick={handleCloseReleaseForm}>Cancel</button>
-            <button className="save-btn" onClick={handleSubmitAllReleaseItems} disabled={loading || releaseItemsList.length === 0}>
-              {loading ? 'Submitting...' : `✅ Submit All (${releaseItemsList.length} items)`}
+            <button className="save-btn" onClick={handleSubmitAllReleaseItems} disabled={loading || releaseItemsList.length === 0} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {loading ? 'Submitting...' : (
+                <>
+                  <FiCheckCircle style={{ width: '1em', height: '1em', strokeWidth: 2.4 }} />
+                  <span>Submit All ({releaseItemsList.length} items)</span>
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -443,5 +482,42 @@ const TabItemsReleased = ({ adminData }) => {
     </div>
   );
 };
+
+const tabReleasedIconCss = `
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1em;
+  height: 1em;
+  line-height: 1;
+}
+.btn-icon svg { width: 100%; height: 100%; stroke-width: 2.4; }
+
+.section-heading-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  margin-right: 8px;
+  vertical-align: -0.15em;
+  color: #1a1f26;
+}
+.section-heading-icon svg { width: 100%; height: 100%; stroke-width: 2.2; }
+
+.close-form-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #475569;
+}
+.close-form-btn svg { width: 1em; height: 1em; stroke-width: 2.4; }
+
+@media (max-width: 480px) {
+  .section-heading-icon { margin-right: 6px; }
+}
+`;
 
 export default TabItemsReleased;
